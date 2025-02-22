@@ -1,0 +1,52 @@
+version: "3.8"
+services:
+  master:
+    build:
+      context: .
+      dockerfile: Master.Dockerfile
+    ports:
+      - "5001:5000"
+    environment:
+      - WORKERS=worker1:50051,worker2:50051,worker3:50051,worker4:50051
+    networks:
+      - distributed-net
+
+  worker1:
+    build:
+      context: .
+      dockerfile: Worker.Dockerfile
+    environment:
+      - WORKER_ID=1
+    networks:
+      - distributed-net
+
+  worker2:
+    build:
+      context: .
+      dockerfile: Worker.Dockerfile
+    environment:
+      - WORKER_ID=2
+    networks:
+      - distributed-net
+
+  worker3:
+    build:
+      context: .
+      dockerfile: Worker.Dockerfile
+    environment:
+      - WORKER_ID=3
+    networks:
+      - distributed-net
+
+  worker4:
+    build:
+      context: .
+      dockerfile: Worker.Dockerfile
+    environment:
+      - WORKER_ID=4
+    networks:
+      - distributed-net
+
+networks:
+  distributed-net:
+    driver: bridge

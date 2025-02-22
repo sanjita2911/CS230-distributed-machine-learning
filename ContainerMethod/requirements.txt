@@ -1,0 +1,5 @@
+grpcio
+grpcio-tools
+scikit-learn
+flask
+flask-cors
