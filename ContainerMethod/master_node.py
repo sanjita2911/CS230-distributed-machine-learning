@@ -6,6 +6,13 @@ import time
 import ml_task_pb2
 import ml_task_pb2_grpc
 import random
+import os
+import uuid
+import threading
+import requests
+import kaggle
+from kaggle.api.kaggle_api_extended import KaggleApi
+from datasets import load_dataset  # Hugging Face datasets
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)  # This sets the logging level to DEBUG
@@ -28,6 +35,8 @@ workers = [
     "worker3:50051",
     "worker4:50051"
 ]
+
+DATASET_PATH = "/mnt/efs/datasets/"     # EFS mounted directory
 
 
 def select_worker():
@@ -130,6 +139,86 @@ def execute_task():
     except Exception as e:
         logger.error("Internal server error: %s", str(e))
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
+
+@app.route('/create_session', methods=['POST'])
+def create_session():
+    session_id = str(uuid.uuid4())
+    return jsonify({"session_id": session_id})
+
+
+@app.route('/check_data_exists', methods=['GET'])
+def check_data_exists():
+    dataset_name = request.args.get("dataset_name")
+    dataset_id = request.args.get("dataset_id")
+    dataset_path = os.path.join(DATASET_PATH, f"{dataset_id}_{dataset_name}")
+
+    if os.path.exists(dataset_path):
+        return jsonify({"exists": True, "path": dataset_path})
+    return jsonify({"exists": False, "message": "Dataset not found"})
+
+
+@app.route('/download_data', methods=['POST'])
+def download_data():
+    data = request.get_json()
+    dataset_url = data.get("dataset_url")
+    dataset_id = data.get("dataset_id")
+    dataset_name = data.get("dataset_name")
+
+    if not dataset_url or not dataset_id or not dataset_name:
+        return jsonify({"error": "Missing dataset parameters"}), 400
+
+    dataset_path = os.path.join(DATASET_PATH, f"{dataset_id}_{dataset_name}")
+    os.makedirs(dataset_path, exist_ok=True)
+
+    # Run the download in a separate thread to avoid blocking API
+    thread = threading.Thread(target=download_dataset, args=(dataset_url, dataset_path))
+    thread.start()
+
+    return jsonify({"message": "Dataset download started", "dataset_path": dataset_path})
+
+
+def download_dataset(dataset_url, dataset_path):
+    # Download from Kaggle
+    if "kaggle.com" in dataset_url:
+        api = KaggleApi()
+        api.authenticate()
+        dataset_name = dataset_url.split("/")[-1]
+        api.dataset_download_files(dataset_name, path=dataset_path, unzip=True)
+
+    # Download from Hugging Face
+    elif "huggingface.co" in dataset_url:
+        dataset_name = dataset_url.split("/")[-1]
+        dataset = load_dataset(dataset_name)
+        dataset.save_to_disk(dataset_path)
+
+    # Download from Direct URL
+    else:
+        response = requests.get(dataset_url, stream=True)
+        filename = dataset_url.split("/")[-1]
+        file_path = os.path.join(dataset_path, filename)
+
+        with open(file_path, "wb") as file:
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:
+                    file.write(chunk)
+
+    print(f"Dataset downloaded successfully to {dataset_path}")
+
+
+@app.route('/check_status', methods=['GET'])
+def check_status():
+    return None
+
+
+@app.route('/balance_load', methods=['POST'])
+def balance_load():
+    return None
+
+
+@app.route('/distribute_task', methods=['POST'])
+def distribute_task():
+    return None
 
 
 if __name__ == "__main__":
