@@ -3,3 +3,5 @@ grpcio-tools
 scikit-learn
 flask
 flask-cors
+requests
+kagglehub

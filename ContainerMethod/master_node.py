@@ -10,9 +10,10 @@ import os
 import uuid
 import threading
 import requests
-import kaggle
-from kaggle.api.kaggle_api_extended import KaggleApi
-from datasets import load_dataset  # Hugging Face datasets
+import kagglehub
+import shutil
+
+# from datasets import load_dataset  # Hugging Face datasets
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)  # This sets the logging level to DEBUG
@@ -147,11 +148,10 @@ def create_session():
     return jsonify({"session_id": session_id})
 
 
-@app.route('/check_data_exists', methods=['GET'])
+@app.route('/check_data', methods=['GET'])
 def check_data_exists():
     dataset_name = request.args.get("dataset_name")
-    dataset_id = request.args.get("dataset_id")
-    dataset_path = os.path.join(DATASET_PATH, f"{dataset_id}_{dataset_name}")
+    dataset_path = os.path.join(DATASET_PATH, f"{dataset_name}")
 
     if os.path.exists(dataset_path):
         return jsonify({"exists": True, "path": dataset_path})
@@ -161,47 +161,45 @@ def check_data_exists():
 @app.route('/download_data', methods=['POST'])
 def download_data():
     data = request.get_json()
-    dataset_url = data.get("dataset_url")
-    dataset_id = data.get("dataset_id")
-    dataset_name = data.get("dataset_name")
+    url = data.get("dataset_url")
+    name = data.get("dataset_name")
+    type = data.get("dataset_type")
 
-    if not dataset_url or not dataset_id or not dataset_name:
+    if not url or not name or not type:
         return jsonify({"error": "Missing dataset parameters"}), 400
 
-    dataset_path = os.path.join(DATASET_PATH, f"{dataset_id}_{dataset_name}")
+    dataset_path = os.path.join(DATASET_PATH, f"{name}")
     os.makedirs(dataset_path, exist_ok=True)
 
     # Run the download in a separate thread to avoid blocking API
-    thread = threading.Thread(target=download_dataset, args=(dataset_url, dataset_path))
+    thread = threading.Thread(target=download_dataset, args=(url, type, dataset_path))
     thread.start()
 
     return jsonify({"message": "Dataset download started", "dataset_path": dataset_path})
 
 
-def download_dataset(dataset_url, dataset_path):
-    # Download from Kaggle
-    if "kaggle.com" in dataset_url:
-        api = KaggleApi()
-        api.authenticate()
-        dataset_name = dataset_url.split("/")[-1]
-        api.dataset_download_files(dataset_name, path=dataset_path, unzip=True)
+def download_dataset(url, type, dataset_path):
+    if type == "kaggle":
+        temp_path = kagglehub.dataset_download(url)      # download from kaggle
+
+        shutil.move(temp_path, dataset_path)        # upload to efs
 
     # Download from Hugging Face
-    elif "huggingface.co" in dataset_url:
-        dataset_name = dataset_url.split("/")[-1]
-        dataset = load_dataset(dataset_name)
-        dataset.save_to_disk(dataset_path)
+    # elif "huggingface.co" in dataset_url:
+    #     dataset_name = dataset_url.split("/")[-1]
+    #     dataset = load_dataset(dataset_name)
+    #     dataset.save_to_disk(dataset_path)
 
     # Download from Direct URL
-    else:
-        response = requests.get(dataset_url, stream=True)
-        filename = dataset_url.split("/")[-1]
-        file_path = os.path.join(dataset_path, filename)
+    # else:
+    #     response = requests.get(dataset_url, stream=True)
+    #     filename = dataset_url.split("/")[-1]
+    #     file_path = os.path.join(dataset_path, filename)
 
-        with open(file_path, "wb") as file:
-            for chunk in response.iter_content(chunk_size=1024):
-                if chunk:
-                    file.write(chunk)
+    #     with open(file_path, "wb") as file:
+    #         for chunk in response.iter_content(chunk_size=1024):
+    #             if chunk:
+    #                 file.write(chunk)
 
     print(f"Dataset downloaded successfully to {dataset_path}")
 
@@ -220,7 +218,10 @@ def balance_load():
 def distribute_task():
     return None
 
+    # input: model, params list, dataset_name
+    # return session_id, dataset_name, model, params combos
+
 
 if __name__ == "__main__":
     logger.info("Starting Flask server...")
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5001)
