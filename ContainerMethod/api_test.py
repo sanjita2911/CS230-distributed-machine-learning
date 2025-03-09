@@ -1,6 +1,7 @@
 import requests
+# from DistributedML import DisGridSearch
 
-url = "http://localhost:5001/execute_task"
+# url = "http://localhost:5001/execute_task"
 payload = [{
     "algorithm": "RandomForest",
     "dataset_id": "dataset1",
@@ -29,18 +30,58 @@ payload1 = {
     "hyperparameters": {"n_estimators": "100", "max_depth": "5"}
 }
 
-# response = requests.post(url, json=payload1)
+import requests
+import time
+import json
 
-# Send the request
-for i in payload:
-    response = requests.post(url, json=i)
+# Base URL of the Flask API
+base_url = "http://127.0.0.1:5001"
 
-# Print status code and response
-print(f"Status Code: {response.status_code}")
-print("Response Text:", response.text)
+# Function to create a session
+def create_session():
+    response = requests.post(f"{base_url}/create_session")
+    if response.status_code == 201:
+        session_id = response.json().get("session_id")
+        print(f"Session created with ID: {session_id}")
+        return session_id
+    else:
+        print("Failed to create session")
+        return None
 
-# If the response is JSON, print it
-if response.status_code == 200:
-    print("Response JSON:", response.json())
-else:
-    print("Error response:", response.text)
+# Function to execute a task
+def execute_task(session_id, task_payload):
+    """Execute a task by sending a POST request."""
+    task_payload["session_id"] = session_id
+    response = requests.post(f"{base_url}/execute_task", json=task_payload)
+    if response.status_code == 200:
+        print(f"Task executed: {response.json()}")
+    else:
+        print(f"Failed to execute task: {response.json()}")
+# Function to check task status
+def check_status(session_id):
+    response = requests.get(f"{base_url}/status/{session_id}")
+    if response.status_code == 200:
+        print(f"Status for session {session_id}: {response.json()}")
+    else:
+        print(f"Failed to get status for session {session_id}: {response.json()}")
+
+
+def main():
+    # Step 1: Create a session
+    session_id = create_session()
+    if not session_id:
+        return
+
+    # Step 2: Send 6 tasks to the Flask API
+    for task in payload:
+        execute_task(session_id, task)
+        check_status(session_id)
+        time.sleep(5)  # Add a short delay between requests
+        check_status(session_id)
+
+    # Step 3: Check the task status after submitting all tasks
+    time.sleep(2)  # Wait for the tasks to be processed
+    check_status(session_id)
+
+if __name__ == "__main__":
+    main()

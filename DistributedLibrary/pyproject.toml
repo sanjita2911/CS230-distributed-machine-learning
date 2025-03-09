@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "distributed-ml"
+version = "0.1.0"
+authors = [{name = "Sumit Raut", email = "sumitcraut@gmail.com"}]
+description = "A package for training models via API calls"
+readme = "README.md"
+dependencies = ["requests"]
+requires-python = ">=3.6"

@@ -12,12 +12,15 @@ import threading
 import requests
 import kagglehub
 import shutil
-
 # from datasets import load_dataset  # Hugging Face datasets
+import redis
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)  # This sets the logging level to DEBUG
 logger = logging.getLogger(__name__)
+
+redis_client = redis.StrictRedis(host='redis-master', port=6379, db=0, decode_responses=True)
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -75,6 +78,23 @@ def send_task(worker, task_request):
         logger.error(f"gRPC error when sending task to {worker}: {e.code()} - {e.details()}")
         raise e  # Re-raise the error to be caught in the Flask route
 
+@app.route("/create_session", methods=["POST"])
+def create_session():
+    """Creates a new user session and stores it in Redis."""
+    session_id = str(uuid.uuid4())
+    redis_client.sadd("active_sessions", session_id)  # Add to active sessions
+    redis_client.set(f"session:{session_id}:tasks_pending", 0)  # Initialize task counter
+    return jsonify({"message": "Session created", "session_id": session_id}), 201
+
+
+@app.route("/status/<session_id>", methods=["GET"])
+def check_status(session_id):
+    """Returns the number of pending tasks for a session."""
+    if not redis_client.sismember("active_sessions", session_id):
+        return jsonify({"error": "Invalid session ID"}), 404
+
+    pending_tasks = int(redis_client.get(f"session:{session_id}:tasks_pending") or 0)
+    return jsonify({"session_id": session_id, "tasks_pending": pending_tasks})
 
 @app.route("/execute_task", methods=["POST"])
 def execute_task():
@@ -93,6 +113,7 @@ def execute_task():
             return jsonify({"error": "No JSON body received"}), 400
 
         # Extract details from the request
+        session_id = data.get("session_id")
         algorithm = data.get("algorithm")
         dataset_id = data.get("dataset_id")
         hyperparameters = data.get("hyperparameters")
@@ -100,6 +121,9 @@ def execute_task():
         if not algorithm or not dataset_id or not hyperparameters:
             logger.warning("Missing required parameters.")
             return jsonify({"error": "Missing required parameters"}), 400
+
+        if not redis_client.sismember("active_sessions", session_id):
+            return jsonify({"error": "Invalid session ID"}), 404
 
         logger.info("Algorithm: %s, Dataset: %s, Hyperparameters: %s", algorithm, dataset_id, hyperparameters)
 
@@ -114,6 +138,8 @@ def execute_task():
             hyperparameters=hyperparameters
         )
 
+        redis_client.incr(f"session:{session_id}:tasks_pending")
+
         # Send task to the selected worker node
         start_time = time.time()
         response = send_task(worker, task_request)
@@ -122,6 +148,7 @@ def execute_task():
         # Update the last execution time for the selected worker
         worker_last_execution_time[worker] = end_time - start_time
         logger.info("Task execution completed in %.2f seconds.", end_time - start_time)
+        redis_client.decr(f"session:{session_id}:tasks_pending")
 
         return jsonify({
             "worker_id": response.worker_id,

@@ -5,3 +5,4 @@ flask
 flask-cors
 requests
 kagglehub
+redis

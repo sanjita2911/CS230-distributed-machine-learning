@@ -1,5 +1,14 @@
 version: "3.8"
 services:
+  redis:
+    image: redis:latest
+    container_name: redis-master
+    ports:
+      - "6379:6379"
+    networks:
+      - distributed-net
+    command: [ "redis-server", "--appendonly", "yes" ]
+
   master:
     build:
       context: .
@@ -47,6 +56,35 @@ services:
     networks:
       - distributed-net
 
-networks:
-  distributed-net:
-    driver: bridge
+#   zookeeper:
+#     image: confluentinc/cp-zookeeper:latest
+#     container_name: zookeeper
+#     ports:
+#       - "2181:2181"
+#     networks:
+#       - distributed-net
+
+#   kafka:
+#     image: confluentinc/cp-kafka:latest
+#     container_name: kafka
+#     depends_on:
+#       - zookeeper
+#     environment:
+#       KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093
+#       KAFKA_LISTENER_SECURITY_PROTOCOL: PLAINTEXT
+#       KAFKA_LISTENER_NAME_INTERNAL: INSIDE
+#       KAFKA_LISTENER_PORT: 9093
+#       KAFKA_LISTENERS: INSIDE://0.0.0.0:9093
+#       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+#       KAFKA_LISTENER_INTER_BROKER_PROTOCOL: INSIDE
+#       KAFKA_LISTENER_NAME_EXTERNAL: OUTSIDE
+#       KAFKA_LISTENER_EXTERNAL: EXTERNAL://0.0.0.0:9092
+#       KAFKA_ADVERTISED_LISTENERS_EXTERNAL: EXTERNAL://kafka:9092
+#     ports:
+#       - "9092:9092"
+#     networks:
+#       - distributed-net
+
+# networks:
+#   distributed-net:
+#     driver: bridge
