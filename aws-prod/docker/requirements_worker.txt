@@ -1,0 +1,7 @@
+scikit-learn
+numpy
+pandas
+kafka-python
+redis
+datasets
+boto3

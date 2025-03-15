@@ -1,4 +1,5 @@
 version: "3.8"
+
 services:
   redis:
     image: redis:latest
@@ -6,7 +7,7 @@ services:
     ports:
       - "6379:6379"
     networks:
-      - distributed-net
+      - mlnet
     command: [ "redis-server", "--appendonly", "yes" ]
 
   zookeeper:
@@ -14,7 +15,7 @@ services:
     ports:
       - "2181:2181"
     networks:
-      - distributed-net
+      - mlnet
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "2181"]
       interval: 10s
@@ -28,13 +29,13 @@ services:
     environment:
       KAFKA_ADVERTISED_HOST_NAME: kafka
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_CREATE_TOPICS: "task_requests:4:1,task_responses:4:1"
+      KAFKA_CREATE_TOPICS: "train:4:1,result:4:1"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     depends_on:
       zookeeper:
         condition: service_healthy
     networks:
-      - distributed-net
+      - mlnet
     healthcheck:
       test: ["CMD", "kafka-topics.sh", "--list", "--zookeeper", "zookeeper:2181"]
       interval: 10s
@@ -44,50 +45,74 @@ services:
   master:
     build:
       context: .
-      dockerfile: Master.Dockerfile
+      dockerfile: docker/Master.Dockerfile
     ports:
-      - "5001:5000"
+      - "5001:5001"
+    volumes:
+      - ./master:/app
+    depends_on:
+      kafka:
+        condition: service_healthy
     environment:
       - WORKERS=worker1:50051,worker2:50051,worker3:50051,worker4:50051
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - FLASK_APP=app/master.py
+      - PYTHONUNBUFFERED=1
     networks:
-      - distributed-net
+      - mlnet
 
   worker1:
     build:
       context: .
-      dockerfile: Worker.Dockerfile
+      dockerfile: docker/Worker.Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
     environment:
       - WORKER_ID=1
     networks:
-      - distributed-net
+      - mlnet
 
   worker2:
     build:
       context: .
-      dockerfile: Worker.Dockerfile
+      dockerfile: docker/Worker.Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
     environment:
       - WORKER_ID=2
     networks:
-      - distributed-net
+      - mlnet
 
   worker3:
     build:
       context: .
-      dockerfile: Worker.Dockerfile
+      dockerfile: docker/Worker.Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
     environment:
       - WORKER_ID=3
     networks:
-      - distributed-net
+      - mlnet
 
   worker4:
     build:
       context: .
-      dockerfile: Worker.Dockerfile
+      dockerfile: docker/Worker.Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
     environment:
       - WORKER_ID=4
     networks:
-      - distributed-net
+      - mlnet
 
+networks:
+  mlnet:
+    driver: bridge
 #   zookeeper:
 #     image: confluentinc/cp-zookeeper:latest
 #     container_name: zookeeper
