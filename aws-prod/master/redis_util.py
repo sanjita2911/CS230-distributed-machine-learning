@@ -84,7 +84,7 @@ def save_subtasks_to_redis(subtasks, redis_client):
         return {"status": "error", "message": f"Error saving to Redis: {str(e)}"}
 
 
-def update_subtask(session_id, job_id, subtask_id, redis_client):
+def update_subtask(session_id, job_id, subtask_id, status, result_data, redis_client):
     """
     Mark a subtask as completed in Redis and update job progress.
 
@@ -99,7 +99,7 @@ def update_subtask(session_id, job_id, subtask_id, redis_client):
     """
     try:
         # Define Redis key structure
-        session_key = f"ml:sessions:{session_id}"
+        session_key = f"active_sessions:{session_id}"
         job_key = f"{session_key}:jobs:{job_id}"
         subtask_key = f"{job_key}:subtasks:{subtask_id}"
 
@@ -109,8 +109,11 @@ def update_subtask(session_id, job_id, subtask_id, redis_client):
 
         # Update subtask status to completed
         subtask_data = json.loads(redis_client.get(subtask_key))
-        subtask_data["status"] = "completed"
+        logger.info(subtask_data)
+        subtask_data["status"] = status
+        subtask_data['result'] = result_data.get('result', {})
         subtask_data["completed_at"] = datetime.now().isoformat()
+        logger.info(subtask_data)
         redis_client.set(subtask_key, json.dumps(subtask_data))
 
         # Remove subtask from pending list and add to completed list
@@ -120,13 +123,13 @@ def update_subtask(session_id, job_id, subtask_id, redis_client):
         # Update completed subtasks count
         redis_client.hincrby(job_key, "completed_subtasks", 1)
 
-        # Check if all subtasks are completed
-        total_subtasks = int(redis_client.hget(job_key, "total_subtasks") or 0)
-        completed_subtasks = int(redis_client.hget(job_key, "completed_subtasks") or 0)
+        # # Check if all subtasks are completed
+        # total_subtasks = int(redis_client.hget(job_key, "total_subtasks") or 0)
+        # completed_subtasks = int(redis_client.hget(job_key, "completed_subtasks") or 0)
 
-        if completed_subtasks >= total_subtasks:
-            redis_client.hset(job_key, "status", "completed")
-            redis_client.hset(job_key, "completed_at", datetime.now().isoformat())
+        # if completed_subtasks >= total_subtasks:
+        #     redis_client.hset(job_key, "status", "completed")
+        #     redis_client.hset(job_key, "completed_at", datetime.now().isoformat())
 
         return {
             "status": "success",

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS  # Import CORS
 import time
 import random
@@ -80,14 +80,6 @@ def download_data(session_id):
     else:
         return jsonify({"error": message}), 500
 
-# @app.route('/check_status/<session_id>/<job_id>', methods=['GET'])
-# def check_status(session_id):
-#     """Returns the number of pending tasks for a session."""
-#     if not redis_client.sismember("active_sessions", session_id):
-#         return jsonify({"error": "Invalid session ID"}), 404
-#
-#     pending_tasks = int(redis_client.get(f"session:{session_id}:tasks_pending") or 0)
-#     return jsonify({"session_id": session_id, "tasks_pending": pending_tasks})
 @app.route('/check_status/<session_id>/<job_id>', methods=['GET'])
 def check_status(session_id, job_id):
     """Returns the number of pending tasks for a session, job status, and job results if completed."""
@@ -96,17 +88,15 @@ def check_status(session_id, job_id):
     if not redis_client.sismember("active_sessions", session_id):
         return jsonify({"error": "Invalid session ID"}), 404
 
+    session_key = f"active_sessions:{session_id}"
+    job_key = f"{session_key}:jobs:{job_id}"
+
+    # Retrieve the status (completion percentage)
+    job_status = redis_client.hget(job_key, "status")
+    if not job_status:
+        return jsonify({"error": f"Job {job_id} not found."}), 404
     # Get pending tasks for the session
-    pending_tasks = int(redis_client.get(f"active_sessions:{session_id}:jobs:{job_id}:tasks_pending") or 0)
-
-    # Check job status
-    # job_status = redis_client.get(f"jobs:{job_id}:status")
-    job_status = redis_client.get(f"jobs:{job_id}:status")
-    logger.info(job_status)
-    # if not job_status:
-    #     return jsonify({"error": f"Job {job_id} not found."}), 404
-
-    # job_status = job_status # Decode from bytes to string
+    pending_tasks = int(redis_client.get(f"session:{session_id}:tasks_pending") or 0)
 
     # Get the total number of subtasks for the job
     subtask_keys = redis_client.keys(f"active_sessions:{session_id}:jobs:{job_id}:subtasks:{job_id}-subtask-*")
@@ -114,20 +104,24 @@ def check_status(session_id, job_id):
 
     # If the job is completed, fetch the job results
     if job_status == "completed":
-        job_result = redis_client.get(f"jobs:{job_id}:result")
+        job_result = redis_client.get(f"{job_key}:result")
         if not job_result:
             return jsonify({"error": "Job result not found."}), 404
 
-        job_result = json.loads(job_result)  # Decode and parse the result from JSON
-
-        return jsonify({
-            "session_id": session_id,
+        job_result = json.loads(job_result)
+        response = {"session_id": session_id,
             "tasks_pending": pending_tasks,
             "job_id": job_id,
             "job_status": job_status,
             "job_result": job_result,  # Include job results in the response
             "total_subtasks": total_subtasks  # Total subtasks for the status bar
-        })
+        }
+        if total_subtasks>1:
+            response['best_result'] = job_result.get('best_result')
+            logger.info(job_result)
+            return jsonify(response)
+
+        return jsonify(response)
 
     # If the job is not completed, return job status and pending tasks
     return jsonify({
@@ -173,48 +167,34 @@ def train(session_id):
     logger.info("Result collector thread started here...")
 
 
+    return jsonify({"status": "Model Training Started . . . ."})
 
-
-    return jsonify({"All good": "final test"})
-
-
-@app.route('/job_results/<session_id>/<job_id>', methods=['GET'])
-def job_results(session_id, job_id):
-    """Get results for a specific job"""
-    # Validate session ID
+@app.route('/download_model/<session_id>/<job_id>', methods=['POST'])
+def download_best_model(session_id,job_id):
+    # Simulate fetching the best result for a given job_id
     if not redis_client.sismember("active_sessions", session_id):
         return jsonify({"error": "Invalid session ID"}), 404
 
-    # Check if job belongs to session
-    if not redis_client.sismember(f"session:{session_id}:jobs", job_id):
-        return jsonify({"error": "Job not found for this session"}), 404
+    session_key = f"active_sessions:{session_id}"
+    job_key = f"{session_key}:jobs:{job_id}"
 
-    # Get job status
-    job_status = redis_client.get(f"job:{job_id}:status")
+    # Retrieve the status (completion percentage)
+    job_status = redis_client.hget(job_key, "status")
     if not job_status:
-        return jsonify({"error": "Job not found"}), 404
+        return jsonify({"error": f"Job {job_id} not found."}), 404
 
-    job_status = job_status.decode('utf-8')
+    data = request.get_json()
+    # Check if the model path exists
+    model_path = data['model_path']
+    if not os.path.exists(model_path):
+        return jsonify({"status": "error", "message": "Model file not found"}), 404
 
-    # If job is still processing, return status and completion percentage
-    if job_status != "completed":
-        completion = redis_client.get(f"job:{job_id}:completion") or b'0'
-        return jsonify({
-            "job_id": job_id,
-            "status": job_status,
-            "completion_percentage": float(completion)
-        }), 200
+    # Return the model file for download
+    return send_file(model_path, as_attachment=True, attachment_filename=f"{data['model_id']}.pkl")
 
-    # If job is completed, return results
-    job_result = redis_client.get(f"job:{job_id}:result")
-    if job_result:
-        return jsonify(json.loads(job_result)), 200
-    else:
-        return jsonify({
-            "job_id": job_id,
-            "status": "completed",
-            "error": "Results not found"
-        }), 404
+if __name__ == '__main__':
+    app.run(debug=True)
+
 
 
 if __name__ == "__main__":
