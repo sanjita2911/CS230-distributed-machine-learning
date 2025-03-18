@@ -105,7 +105,7 @@ class MLTaskManager:
         payload = {
             'job_id': job_id,
             'session_id': self.session_id,
-            'dataset_id': dataset_name,
+            'dataset_name': dataset_name,
             'model_details': self._extract_model_details(estimator),
             'train_params': train_params
         }
@@ -132,12 +132,12 @@ class MLTaskManager:
                     return status
                 time.sleep(polling_interval)
     
-    def grid_search_cv(self, estimator, data_name, param_grid):
+    def grid_search_cv(self, estimator, dataset_name, param_grid):
         """Performs Grid Search CV on the dataset."""
         job_id = str(uuid.uuid4())
         payload = {
             "session_id": self.session_id,
-            "data_name": data_name,
+            "dataset_name": dataset_name,
             "estimator": type(estimator).__name__,
             "param_grid": param_grid
         }

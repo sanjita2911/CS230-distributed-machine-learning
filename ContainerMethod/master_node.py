@@ -12,9 +12,11 @@ import threading
 import requests
 import kagglehub
 import shutil
-# from datasets import load_dataset  # Hugging Face datasets
+from datasets import load_dataset
 import redis
 import uuid
+from sklearn.model_selection import ParameterGrid
+
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)  # This sets the logging level to DEBUG
@@ -204,22 +206,21 @@ def download_dataset(url, type, dataset_path):
 
         shutil.move(temp_path, dataset_path)        # upload to efs
 
-    # Download from Hugging Face
-    # elif "huggingface.co" in dataset_url:
-    #     dataset_name = dataset_url.split("/")[-1]
-    #     dataset = load_dataset(dataset_name)
-    #     dataset.save_to_disk(dataset_path)
+    elif type == "huggingface":
+        dataset_name = url.split("/")[-1]
+        dataset = load_dataset(dataset_name)
+        dataset.save_to_disk(dataset_path)
 
-    # Download from Direct URL
-    # else:
-    #     response = requests.get(dataset_url, stream=True)
-    #     filename = dataset_url.split("/")[-1]
-    #     file_path = os.path.join(dataset_path, filename)
+    elif type == "direct":
+        filename = url.split("/")[-1]
+        file_path = os.path.join(dataset_path, filename)
 
-    #     with open(file_path, "wb") as file:
-    #         for chunk in response.iter_content(chunk_size=1024):
-    #             if chunk:
-    #                 file.write(chunk)
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            with open(file_path, "wb") as file:
+                for chunk in response.iter_content(chunk_size=1024):
+                    if chunk:
+                        file.write(chunk)
 
     print(f"Dataset downloaded successfully to {dataset_path}")
 
@@ -231,10 +232,30 @@ def balance_load():
 
 @app.route('/distribute_task', methods=['POST'])
 def distribute_task():
-    return None
+    try:
+        data = request.get_json()
+        session_id = data.get("session_id")
+        estimator = data.get("estimator")
+        param_grid = data.get("param_grid")
+        dataset_name = data.get("dataset_name")
 
-    # input: model, params list, dataset_name
-    # return session_id, dataset_name, model, params combos
+        if not estimator or not param_grid or not dataset_name:
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        # Generate all hyperparameter combinations
+        param_combinations = list(ParameterGrid(param_grid))
+
+        response = {
+            "session_id": session_id,
+            "dataset_name": dataset_name,
+            "estimator": estimator,
+            "param_combinations": param_combinations
+        }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 
 if __name__ == "__main__":
