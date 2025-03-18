@@ -168,13 +168,6 @@ def execute_task():
         logger.error("Internal server error: %s", str(e))
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
-
-@app.route('/create_session', methods=['POST'])
-def create_session():
-    session_id = str(uuid.uuid4())
-    return jsonify({"session_id": session_id})
-
-
 @app.route('/check_data', methods=['GET'])
 def check_data_exists():
     dataset_name = request.args.get("dataset_name")
@@ -229,11 +222,6 @@ def download_dataset(url, type, dataset_path):
     #                 file.write(chunk)
 
     print(f"Dataset downloaded successfully to {dataset_path}")
-
-
-@app.route('/check_status', methods=['GET'])
-def check_status():
-    return None
 
 
 @app.route('/balance_load', methods=['POST'])
