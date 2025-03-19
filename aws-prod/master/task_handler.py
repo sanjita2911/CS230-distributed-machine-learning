@@ -1,24 +1,12 @@
-import json
-from redis_util import create_redis_client
-import uuid
-from kafka import KafkaProducer, KafkaConsumer
-
-from config import KAFKA_RESULTS_TOPIC,KAFKA_TRAIN_TOPIC,KAFKA_ADDRESS
 from datetime import datetime
 from sklearn.model_selection import ParameterGrid,ParameterSampler
 from logger_util import logger
 import threading
-from kafka_util import KafkaSingleton
-from kafka import KafkaConsumer
+from kafka_util import get_consumer
 import json
-from flask import jsonify
 from config import KAFKA_RESULTS_TOPIC, KAFKA_ADDRESS
 from redis_util import create_redis_client,update_subtask
 import time
-
-
-
-
 
 def start_result_collector():
     """Start a background thread to collect results from Kafka"""
@@ -26,13 +14,12 @@ def start_result_collector():
     result_thread.start()
     logger.info("Result collector thread started...")
 
-
 def consume_results(subtasks,session_id):
     """Consume results from Kafka and update Redis"""
     redis_client = create_redis_client()
     try:
         logger.info("Initializing Kafka consumer...")
-        consumer = KafkaSingleton.get_consumer()
+        consumer = get_consumer(KAFKA_RESULTS_TOPIC)
         # consumer = KafkaConsumer(
         #     KAFKA_RESULTS_TOPIC,
         #     bootstrap_servers=['127.0.0.1:9092'],
@@ -274,11 +261,6 @@ def aggregate_results(aggregated_results):
         best_result= sorted_results[0] if sorted_results else None
         return best_result
 
-
-
-if __name__=="__main__":
-
-    start_result_collector()
 
 
 

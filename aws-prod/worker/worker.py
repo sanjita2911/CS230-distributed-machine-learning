@@ -145,7 +145,7 @@ def train_model(task):
     logger.info(f'Training Started for {algorithm_type}')
     start_time = time.time()
     model.fit(X_train, y_train)
-    time.sleep(5)
+    time.sleep(8)
     training_time = time.time() - start_time
     logger.info(f'Training Ended for {algorithm_type}')
 

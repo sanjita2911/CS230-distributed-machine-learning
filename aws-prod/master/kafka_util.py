@@ -1,11 +1,10 @@
 import json
 import boto3
-from kafka import KafkaProducer, KafkaConsumer
 from config import REGION
 from config import KAFKA_ADDRESS,KAFKA_TRAIN_TOPIC,KAFKA_RESULTS_TOPIC
 from logger_util import logger
 
-from kafka import KafkaProducer
+from kafka import KafkaProducer,KafkaConsumer
 import atexit
 
 
@@ -39,9 +38,16 @@ def send_to_kafka(subtasks, producer):
     # Make sure all messages are sent
     producer.flush()
 
+
+def get_kafka_address(region_name):
+    client = boto3.client('ssm', region_name=region_name)
+    response = client.get_parameter(Name='/kafka/public-address')
+    print(response)
+    return response['Parameter']['Value']
+
+
 class KafkaSingleton:
     _producer = None
-    _consumer = None
 
     @staticmethod
     def get_producer():
@@ -63,29 +69,6 @@ class KafkaSingleton:
             raise
 
     @staticmethod
-    def get_consumer():
-        """Returns a singleton Kafka consumer instance."""
-        try:
-            if KafkaSingleton._consumer is None:
-
-                # kafka_address = get_kafka_address(REGION) # Un comment on AWS
-                kafka_address = KAFKA_ADDRESS  # Comment on AWS
-                KafkaSingleton._consumer = KafkaConsumer(
-                    KAFKA_RESULTS_TOPIC,
-                    bootstrap_servers=[kafka_address],
-                    auto_offset_reset='earliest',
-                    value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-                    enable_auto_commit=True
-                )
-                logger.info("Kafka consumer created successfully")
-
-            return KafkaSingleton._consumer
-        except Exception as e:
-            logger.error(f"Error creating Kafka consumer: {e}")
-            raise
-
-
-    @staticmethod
     def close_producer():
         """Flush and close the Kafka producer at application exit."""
         if KafkaSingleton._producer is not None:
@@ -93,23 +76,23 @@ class KafkaSingleton:
             KafkaSingleton._producer.close()
             KafkaSingleton._producer = None  # Mark as closed
 
-    @staticmethod
-    def close_consumer():
-        """Flush and close the Kafka producer at application exit."""
-        if KafkaSingleton._consumer is not None:
-            KafkaSingleton._consumer.close()
-            KafkaSingleton._consumer = None  # Mark as closed
+def get_consumer(topic):
+    """Create and return a Kafka consumer for the task_results topic."""
+    try:
+        # kafka_address = get_kafka_address(REGION) # Un comment on AWS
+        kafka_address = KAFKA_ADDRESS               # Comment on AWS
+        consumer = KafkaConsumer(
+            topic,
+            bootstrap_servers=[kafka_address],
+            auto_offset_reset='earliest',
+            value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+        )
+        logger.info("Kafka consumer created successfully")
+        return consumer
+    except Exception as e:
+        logger.error(f"Error creating Kafka consumer: {e}")
+        raise
 
-    @staticmethod
-    def get_kafka_address(self, region_name):
-        client = boto3.client('ssm', region_name=region_name)
-        response = client.get_parameter(Name='/kafka/public-address')
-        print(response)
-        return response['Parameter']['Value']
-
-
-
-atexit.register(KafkaSingleton.close_consumer)
 atexit.register(KafkaSingleton.close_producer)
 
 

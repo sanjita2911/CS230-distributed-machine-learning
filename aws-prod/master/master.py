@@ -141,7 +141,7 @@ def train(session_id):
     if not redis_client.sismember("active_sessions", session_id):
         return jsonify({"error": "Invalid session ID"}), 404
     #
-
+    # get model details
     model_config = request.get_json()
 
 

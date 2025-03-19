@@ -45,9 +45,6 @@ class KafkaProducerSingleton:
         print(response)
         return response['Parameter']['Value']
 
-
-atexit.register(KafkaProducerSingleton.close_producer)
-
 def create_kafka_consumer(topic):
     """Create and return a Kafka consumer for the task_results topic."""
     try:
@@ -66,5 +63,9 @@ def create_kafka_consumer(topic):
     except Exception as e:
         logger.error(f"Error creating Kafka consumer: {e}")
         raise
+
+
+atexit.register(KafkaProducerSingleton.close_producer)
+
 
 
