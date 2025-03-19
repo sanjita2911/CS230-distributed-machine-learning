@@ -1,6 +1,6 @@
 # AWS Configuration
 
-# DATASET_PATH = "/mnt/efs/datasets/"
+# DATASET_PATH = "/mnt/efs/datasets"
 # REGION = 'us-east-2'
 # REDIS_ADDRESS = '172.31.11.144'
 # KAFKA_TRAIN_TOPIC = 'train'
@@ -8,7 +8,7 @@
 
 # Local Docker Configuration
 
-DATASET_PATH = "/datasets"
+DATASET_PATH = "/mnt/efs/datasets"
 REGION = 'us-east-2'
 KAFKA_TRAIN_TOPIC = 'train'
 KAFKA_RESULTS_TOPIC = 'result'

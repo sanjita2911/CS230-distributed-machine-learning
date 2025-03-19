@@ -231,26 +231,27 @@ def load_dataset(dataset_id, train_param):
     """
     # In a real implementation, this would fetch from a data store like S3, HDFS, etc.
     # For this example, we'll simulate loading from a file based on dataset_id
-    dataset_path = f"/datasets/{dataset_id}/{dataset_id}.csv"
+    dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
 
-    if not os.path.exists(dataset_path):  #need to comment on AWS
-        # Simulate dataset with random data if file doesn't exist
-        print(f"Dataset {dataset_id} not found, generating random data")
-        n_samples = 1000
-        n_features = 10
-
-        X = np.random.rand(n_samples, n_features)
-        # Generate a classification or regression target based on first feature
-        y = (X[:, 0] > 0.5).astype(int)  # Classification
-        # Or: y = X[:, 0] * 10 + 5 + np.random.randn(n_samples)  # Regression
-
-        return X, y
+    # if not os.path.exists(dataset_path):  #need to comment on AWS
+    #     # Simulate dataset with random data if file doesn't exist
+    #     print(f"Dataset {dataset_id} not found, generating random data")
+    #     n_samples = 1000
+    #     n_features = 10
+    #
+    #     X = np.random.rand(n_samples, n_features)
+    #     # Generate a classification or regression target based on first feature
+    #     y = (X[:, 0] > 0.5).astype(int)  # Classification
+    #     # Or: y = X[:, 0] * 10 + 5 + np.random.randn(n_samples)  # Regression
+    #
+    #     return X, y
 
     X_columns = train_param['feature_columns']
     y = train_param['target_column']
 
     # Load from file
+    logger.info(f'Loading dataset {dataset_path}')
     df = pd.read_csv(dataset_path)
     # Assuming the last column is the target
     X = df[X_columns]

@@ -10,6 +10,15 @@ services:
       - mlnet
     command: [ "redis-server", "--appendonly", "yes" ]
 
+  storage:
+    image: busybox
+    container_name: shared-storage
+    volumes:
+      - /mnt/efs  # Creates a persistent volume at /mnt/efs
+    command: ["sh", "-c", "mkdir -p /mnt/efs && tail -f /dev/null"]  # Keeps the container alive
+    networks:
+      - mlnet
+
   zookeeper:
     image: wurstmeister/zookeeper
     ports:
@@ -50,9 +59,10 @@ services:
       - "5001:5001"
     volumes:
       - ./master:/app
+      - shared_volume:/mnt/efs  # Master gets RW access
     depends_on:
-      kafka:
-        condition: service_healthy
+      - kafka
+      - storage
     environment:
       - WORKERS=worker1:50051,worker2:50051,worker3:50051,worker4:50051
       - FLASK_ENV=development
@@ -68,9 +78,10 @@ services:
       dockerfile: docker/Worker.Dockerfile
     volumes:
       - ./worker:/app
+      - shared_volume:/mnt/efs:ro  # Read-Only access for workers
     depends_on:
-      kafka:
-        condition: service_healthy
+      - kafka
+      - storage
     environment:
       - WORKER_ID=1
     networks:
@@ -82,9 +93,10 @@ services:
       dockerfile: docker/Worker.Dockerfile
     volumes:
       - ./worker:/app
+      - shared_volume:/mnt/efs:ro  # Read-Only access for workers
     depends_on:
-      kafka:
-        condition: service_healthy
+      - kafka
+      - storage
     environment:
       - WORKER_ID=2
     networks:
@@ -96,9 +108,10 @@ services:
       dockerfile: docker/Worker.Dockerfile
     volumes:
       - ./worker:/app
+      - shared_volume:/mnt/efs:ro  # Read-Only access for workers
     depends_on:
-      kafka:
-        condition: service_healthy
+      - kafka
+      - storage
     environment:
       - WORKER_ID=3
     networks:
@@ -110,9 +123,10 @@ services:
       dockerfile: docker/Worker.Dockerfile
     volumes:
       - ./worker:/app
+      - shared_volume:/mnt/efs:ro  # Read-Only access for workers
     depends_on:
-      kafka:
-        condition: service_healthy
+      - kafka
+      - storage
     environment:
       - WORKER_ID=4
     networks:
@@ -121,106 +135,8 @@ services:
 networks:
   mlnet:
     driver: bridge
-#   zookeeper:
-#     image: confluentinc/cp-zookeeper:latest
-#     container_name: zookeeper
-#     ports:
-#       - "2181:2181"
-#     networks:
-#       - distributed-net
 
-#   kafka:
-#     image: confluentinc/cp-kafka:latest
-#     container_name: kafka
-#     depends_on:
-#       - zookeeper
-#     environment:
-#       KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093
-#       KAFKA_LISTENER_SECURITY_PROTOCOL: PLAINTEXT
-#       KAFKA_LISTENER_NAME_INTERNAL: INSIDE
-#       KAFKA_LISTENER_PORT: 9093
-#       KAFKA_LISTENERS: INSIDE://0.0.0.0:9093
-#       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-#       KAFKA_LISTENER_INTER_BROKER_PROTOCOL: INSIDE
-#       KAFKA_LISTENER_NAME_EXTERNAL: OUTSIDE
-#       KAFKA_LISTENER_EXTERNAL: EXTERNAL://0.0.0.0:9092
-#       KAFKA_ADVERTISED_LISTENERS_EXTERNAL: EXTERNAL://kafka:9092
-#     ports:
-#       - "9092:9092"
-#     networks:
-#       - distributed-net
-
-# networks:
-#   distributed-net:
-#     driver: bridge
-
-#
-#services:
-#  zookeeper:
-#    image: wurstmeister/zookeeper
-#    ports:
-#      - "2181:2181"
-#    networks:
-#      - ml_network
-#    healthcheck:
-#      test: ["CMD", "nc", "-z", "localhost", "2181"]
-#      interval: 10s
-#      timeout: 5s
-#      retries: 5
-#
-#  kafka:
-#    image: wurstmeister/kafka
-#    ports:
-#      - "9092:9092"
-#    environment:
-#      KAFKA_ADVERTISED_HOST_NAME: kafka
-#      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-#      KAFKA_CREATE_TOPICS: "task_requests:4:1,task_responses:4:1"
-#      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-#    depends_on:
-#      zookeeper:
-#        condition: service_healthy
-#    networks:
-#      - ml_network
-#    healthcheck:
-#      test: ["CMD", "kafka-topics.sh", "--list", "--zookeeper", "zookeeper:2181"]
-#      interval: 10s
-#      timeout: 5s
-#      retries: 5
-#
-#  redis:
-#    image: redis:latest
-#    ports:
-#      - "6379:6379"
-#    networks:
-#      - ml_network
-#    healthcheck:
-#      test: ["CMD", "redis-cli", "ping"]
-#      interval: 5s
-#      timeout: 3s
-#      retries: 5
-#
-#  master:
-#    build:
-#      context: .
-#      dockerfile: master.Dockerfile
-#    ports:
-#      - "5001:5001"
-#    environment:
-#      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-#      - REDIS_HOST=redis
-#      - REDIS_PORT=6379
-#      - SECRET_KEY=your_secret_key_here
-#    depends_on:
-#      kafka:
-#        condition: service_healthy
-#      redis:
-#        condition: service_healthy
-#    networks:
-#      - ml_network
-#    healthcheck:
-#      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-#      interval: 10s
-#      timeout: 5s
-#      retries: 3
-#      start_period: 10s
+volumes:
+  shared_volume:
+    name: shared-storage
+    external: false  # Ensures Docker manages it

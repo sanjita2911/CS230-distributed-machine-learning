@@ -91,7 +91,7 @@ def check_data(session_id):
     dataset_id = request.args.get("dataset_name")
     # data = request.get_json()
     # dataset_id = data.get('dataset_name')
-    dataset_path = f"/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
+    dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
     if os.path.exists(dataset_path):
         return jsonify({'status': f'Dataset {dataset_id} found at {dataset_path}'}), 200
@@ -166,7 +166,7 @@ def train(session_id):
     # # job_id = model_config.get('job_id')
     # # session_id = model_config['session_id']
     dataset_id = model_config.get('dataset_id')
-    dataset_path = f"/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
+    dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
     if not os.path.exists(dataset_path):
         return jsonify({'error': f'Dataset {dataset_id} not found, Please Use download_data function'}), 404
