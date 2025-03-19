@@ -4,7 +4,6 @@ import time
 import random
 import os
 import threading
-import requests
 
 import os
 import json
@@ -15,7 +14,6 @@ from logger_util import logger
 from redis_util import create_redis_client,save_subtasks_to_redis,update_subtask
 from task_handler import create_subtasks,start_result_collector,consume_results
 from kafka_util import KafkaSingleton,send_to_kafka
-from datetime import datetime
 
 redis_client = create_redis_client()
 

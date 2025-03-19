@@ -2,11 +2,8 @@ import json
 import os
 import pickle
 import time
-import uuid
-import redis
 import numpy as np
 import pandas as pd
-from kafka import KafkaConsumer, KafkaProducer
 from kafka_util import create_kafka_consumer,KafkaProducerSingleton
 from config import KAFKA_TRAIN_TOPIC,KAFKA_RESULTS_TOPIC,REDIS_ADDRESS
 from sklearn.base import BaseEstimator
@@ -15,7 +12,6 @@ from logger_util import logger
 from sklearn.base import is_classifier, is_regressor
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, r2_score, mean_squared_error
-from redis_util import create_redis_client
 
 # Dictionary of supported model imports for dynamic loading
 MODEL_IMPORTS = {
@@ -40,7 +36,6 @@ MODEL_IMPORTS = {
     'OneHotEncoder': 'from sklearn.preprocessing import OneHotEncoder',
     'Imputer': 'from sklearn.impute import SimpleImputer'
 }
-redis_client = create_redis_client()
 
 def main():
     """
