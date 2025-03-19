@@ -66,6 +66,8 @@ services:
     build:
       context: .
       dockerfile: docker/Worker.Dockerfile
+    volumes:
+      - ./worker:/app
     depends_on:
       kafka:
         condition: service_healthy
@@ -78,6 +80,8 @@ services:
     build:
       context: .
       dockerfile: docker/Worker.Dockerfile
+    volumes:
+      - ./worker:/app
     depends_on:
       kafka:
         condition: service_healthy
@@ -90,6 +94,8 @@ services:
     build:
       context: .
       dockerfile: docker/Worker.Dockerfile
+    volumes:
+      - ./worker:/app
     depends_on:
       kafka:
         condition: service_healthy
@@ -102,6 +108,8 @@ services:
     build:
       context: .
       dockerfile: docker/Worker.Dockerfile
+    volumes:
+      - ./worker:/app
     depends_on:
       kafka:
         condition: service_healthy

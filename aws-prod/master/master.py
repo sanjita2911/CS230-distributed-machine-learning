@@ -80,6 +80,24 @@ def download_data(session_id):
     else:
         return jsonify({"error": message}), 500
 
+
+@app.route('/check_data/<session_id>', methods=['GET'])
+def check_data(session_id):
+    """Check the status of dataset download."""
+
+    # Validate session ID
+    if not redis_client.sismember("active_sessions", session_id):
+        return jsonify({"error": "Invalid session ID"}), 404
+    dataset_id = request.args.get("dataset_name")
+    # data = request.get_json()
+    # dataset_id = data.get('dataset_name')
+    dataset_path = f"/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
+    # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
+    if os.path.exists(dataset_path):
+        return jsonify({'status': f'Dataset {dataset_id} found at {dataset_path}'}), 200
+    else:
+        return jsonify({'error': f'Dataset {dataset_id} not found, Please Use download_data function'}), 404
+
 @app.route('/check_status/<session_id>/<job_id>', methods=['GET'])
 def check_status(session_id, job_id):
     """Returns the number of pending tasks for a session, job status, and job results if completed."""
@@ -192,14 +210,8 @@ def download_best_model(session_id,job_id):
     # Return the model file for download
     return send_file(model_path, as_attachment=True, attachment_filename=f"{data['model_id']}.pkl")
 
-if __name__ == '__main__':
-    app.run(debug=True)
-
-
 
 if __name__ == "__main__":
     logger.info("Starting Flask server...")
 
-    # logger.info("Result Collector started...")
     app.run(debug=True, host="0.0.0.0", port=5001)
-    # start_result_collector()
