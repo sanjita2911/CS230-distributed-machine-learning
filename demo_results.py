@@ -2,10 +2,10 @@ import requests
 
 
 # fill in after running demo_tests
-session_id = ""
-job1_id = ""
-job2_id = ""
-job3_id = ""
+session_id = "c3fba33e-25db-405c-917f-4c694e22b95a"
+job1_id = "6853f494-9cb2-436c-bc09-0b01757ed088"
+job2_id = "d4a7e527-d767-4ce1-87e6-58ea8226c6f7"
+job3_id = "5111623a-6f50-4251-81fc-641a22f7d3ae"
 
 # training results
 job_response = requests.get(f"http://18.217.27.9:5001/check_status/{session_id}/{job1_id}").json()

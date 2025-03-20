@@ -13,7 +13,7 @@ task_manager = MLTaskManager()
 
 # TODO: wanna try on this high-dim dataset instead, for now using iris
 
-# Download the dataset
+# # Download the dataset
 # download_status = task_manager.download_data("krishd123/high-dimensional-datascape", "high", "kaggle")
 # print(download_status)
 
@@ -23,7 +23,8 @@ task_manager = MLTaskManager()
 
 
 # Download the dataset locally
-path = kagglehub.dataset_download("himanshunakrani/iris-dataset")
+# path = kagglehub.dataset_download("himanshunakrani/iris-dataset")
+path = "mnt/efs/datasets/iris"
 iris = pd.read_csv(f"{path}/iris.csv")
 X, y = iris[["sepal_length", "sepal_width", "petal_length", "petal_width"]], iris["species"]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
@@ -125,7 +126,7 @@ print("Non-Distributed total randomizedsearchcv time:", round(random_time2, 4), 
 methods = ["Training", "GridSearchCV", "RandomizedSearchCV"]
 
 distributed_times = [train_time1, grid_time1, random_time1]
-scikit_times = [train_time2, grid_time2, random_time2]
+scikit_times = [train_time2, grid_time2, random_time2] 
 
 bar_width = 0.35
 x = np.arange(len(methods))

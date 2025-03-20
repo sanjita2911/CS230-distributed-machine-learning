@@ -28,7 +28,7 @@ job_response = task_manager.train(
         'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
         'target_column': 'species'
     },
-    wait_for_completion=False
+    wait_for_completion=True
 )
 
 
@@ -49,8 +49,10 @@ job_response = task_manager.train(
         'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
         'target_column': 'species'
     },
-    wait_for_completion=False
+    wait_for_completion=True
 )
+
+
 
 
 # randomizedsearch job
@@ -65,5 +67,5 @@ job_response = task_manager.train(
         'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
         'target_column': 'species'
     },
-    wait_for_completion=False
+    wait_for_completion=True
 )
