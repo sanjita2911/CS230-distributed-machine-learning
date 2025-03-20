@@ -167,9 +167,9 @@ class MLTaskManager:
             'timestamp': datetime.now().isoformat()
         }
         api_response = self._api_request(f"train/{self.session_id}", "post", data=payload)
-        print(f"Response from Server: {api_response}")
+        print("Job Created:", self.job_id)
+        print(api_response['status'])
         if wait_for_completion and api_response.get("status") != "error":
-            print(f"Waiting for job {self.job_id} to complete...")
             return self._wait_for_completion(self.job_id)
         return api_response
 

@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: distributed-ml
-Version: 0.1.7
+Version: 0.1.9
 Summary: A package for distributed scikit-learn tasks.
 Home-page: https://github.com/sumitraut7/CS230-distributed-machine-learning
 Author: Sumit Raut

@@ -7,17 +7,17 @@ from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 task_manager = MLTaskManager()
 
 
-
 # download & check data
 download_status = task_manager.download_data("himanshunakrani/iris-dataset", "iris", "kaggle")
-print(download_status, '\n')
+print()
+print(download_status['message'], '\n')
 
 data_status = task_manager.check_data("iris")
-print(data_status, '\n')
+print(data_status['status'], '\n')
 
 
 
-# single training job
+# training job
 lr = LogisticRegression()
 job_response = task_manager.train(
     lr,
@@ -28,9 +28,8 @@ job_response = task_manager.train(
         'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
         'target_column': 'species'
     },
-    wait_for_completion=True
+    wait_for_completion=False
 )
-print(job_response.get('job_result'), '\n')
 
 
 
@@ -50,10 +49,8 @@ job_response = task_manager.train(
         'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
         'target_column': 'species'
     },
-    wait_for_completion=True
+    wait_for_completion=False
 )
-print(job_response.get('best_result'), '\n')
-
 
 
 # randomizedsearch job
@@ -68,6 +65,5 @@ job_response = task_manager.train(
         'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
         'target_column': 'species'
     },
-    wait_for_completion=True
+    wait_for_completion=False
 )
-print(job_response.get('best_result'))
