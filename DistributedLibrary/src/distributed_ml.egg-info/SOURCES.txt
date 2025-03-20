@@ -1,0 +1,13 @@
+LICENSE
+MANIFEST.in
+README.md
+pyproject.toml
+setup.py
+src/distributed_ml/__init__.py
+src/distributed_ml/core.py
+src/distributed_ml/utils.py
+src/distributed_ml.egg-info/PKG-INFO
+src/distributed_ml.egg-info/SOURCES.txt
+src/distributed_ml.egg-info/dependency_links.txt
+src/distributed_ml.egg-info/requires.txt
+src/distributed_ml.egg-info/top_level.txt

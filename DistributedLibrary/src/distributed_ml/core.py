@@ -20,7 +20,7 @@ class MLTaskManager:
         Args:
             api_url (str): Base URL of the API endpoint
         """
-        self.api_url = "http://127.0.0.1:5001"
+        self.api_url = "http://18.217.27.9:5001"
         self.session_id = self._create_session()  # Unique session ID
         self.job_id = None
         self.result = None
@@ -197,68 +197,3 @@ class MLTaskManager:
                     self.result = status
                     return status
                 time.sleep(polling_interval)
-
-
-if __name__ == "__main__":
-    task_manager = MLTaskManager()
-
-    # download & check data
-    task_manager.download_data("himanshunakrani/iris-dataset", "iris", "kaggle")
-    data_status = task_manager.check_data("iris")
-    print(data_status)
-
-    # create single training job
-    from sklearn.ensemble import RandomForestClassifier
-
-    rf = RandomForestClassifier(n_estimators=100, max_depth=5)
-    job_response = task_manager.train(
-        rf,
-        dataset_name="iris",
-        train_params={
-            'test_size': 0.25,
-            'random_state': 42,
-            'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
-            'target_column': 'species'
-        },
-        wait_for_completion=True
-    )
-    print(job_response.get('job_result'))
-    # create gridsearch job
-    from sklearn.linear_model import LogisticRegression
-
-    param_grid = {
-        'C': [0.1, 1.0, 10.0, 100],
-        'solver': ['liblinear', 'lbfgs']
-    }
-    lr = LogisticRegression()
-    grid_search = GridSearchCV(lr, param_grid, cv=5)
-
-    job_response = task_manager.train(
-        grid_search,
-        dataset_name="iris",
-        train_params={
-            'test_size': 0.25,
-            'random_state': 42,
-            'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
-            'target_column': 'species'
-        },
-        wait_for_completion=True
-    )
-    print(job_response.get('best_result'))
-
-    # create randomizedsearch job
-    lr = LogisticRegression()
-    random_search = RandomizedSearchCV(lr, param_grid, cv=5)
-
-    job_response = task_manager.train(
-        random_search,
-        dataset_name="iris",
-        train_params={
-            'test_size': 0.25,
-            'random_state': 42,
-            'feature_columns': ['sepal_length', 'sepal_width', 'petal_length', 'petal_width'],
-            'target_column': 'species'
-        },
-        wait_for_completion=True
-    )
-    print(job_response.get('best_result'))

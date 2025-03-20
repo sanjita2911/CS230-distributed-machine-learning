@@ -4,9 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distributed-ml"
-version = "0.1.0"
+version = "0.1.7"
 authors = [{name = "Sumit Raut", email = "sumitcraut@gmail.com"}]
-description = "A package for training models via API calls"
+description = "A package for distributed scikit-learn tasks."
 readme = "README.md"
-dependencies = ["requests"]
+dependencies = ["requests", "setuptools", "numpy", "pandas", "tqdm", "scikit-learn"]
 requires-python = ">=3.6"
+
+[tool.setuptools]
+packages = ["distributed_ml"]
+package-dir = {"" = "src"}

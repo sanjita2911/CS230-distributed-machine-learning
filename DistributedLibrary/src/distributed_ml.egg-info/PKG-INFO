@@ -1,3 +1,23 @@
+Metadata-Version: 2.2
+Name: distributed-ml
+Version: 0.1.7
+Summary: A package for distributed scikit-learn tasks.
+Home-page: https://github.com/sumitraut7/CS230-distributed-machine-learning
+Author: Sumit Raut
+Author-email: Sumit Raut <sumitcraut@gmail.com>
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests
+Requires-Dist: setuptools
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: tqdm
+Requires-Dist: scikit-learn
+Dynamic: author
+Dynamic: home-page
+Dynamic: requires-python
+
 # distributed-ml
 
 distributed-ml is a Python-based machine learning package that facilitates model training, hyperparameter tuning, and data handling through a structured API. It supports various scikit-learn estimators, including classifiers, regressors, and hyperparameter search classes like GridSearchCV and RandomizedSearchCV.
