@@ -1,6 +1,7 @@
 from distributed_ml import MLTaskManager
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.ensemble import RandomForestClassifier
 
 
 # instantiate class
@@ -18,7 +19,7 @@ print(data_status['status'], '\n')
 
 
 # training job
-lr = LogisticRegression()
+lr = RandomForestClassifier(n_estimators=5)
 job_response = task_manager.train(
     lr,
     dataset_name="iris",

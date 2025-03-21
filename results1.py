@@ -24,8 +24,8 @@ task_manager = MLTaskManager()
 
 # Download the dataset locally
 # path = kagglehub.dataset_download("himanshunakrani/iris-dataset")
-path = "mnt/efs/datasets/iris"
-iris = pd.read_csv(f"{path}/iris.csv")
+#path = "mnt/efs/datasets/iris"
+iris = pd.read_csv("iris.csv")
 X, y = iris[["sepal_length", "sepal_width", "petal_length", "petal_width"]], iris["species"]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
 
