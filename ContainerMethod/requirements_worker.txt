@@ -1,5 +1,0 @@
-grpcio
-grpcio-tools
-scikit-learn
-numpy
-pandas
