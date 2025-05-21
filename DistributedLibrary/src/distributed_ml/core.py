@@ -13,14 +13,14 @@ from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
 
 class MLTaskManager:
-    def __init__(self):
+    def __init__(self, url):
         """
         Initializes the task manager with the API base URL.
 
         Args:
             api_url (str): Base URL of the API endpoint
         """
-        self.api_url = "http://18.217.27.9:5001"
+        self.api_url = url
         self.session_id = self._create_session()  # Unique session ID
         self.job_id = None
         self.result = None

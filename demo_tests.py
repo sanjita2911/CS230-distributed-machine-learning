@@ -5,7 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 
 # instantiate class
-task_manager = MLTaskManager()
+task_manager = MLTaskManager("http://3.17.175.226:5001")
 
 
 # download & check data
