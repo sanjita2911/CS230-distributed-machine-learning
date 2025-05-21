@@ -29,7 +29,7 @@ from distributed_ml import MLTaskManager
 - Instantiates the class and returns a session ID.
 
 ```python
-manager = MLTaskManager()
+manager = MLTaskManager("http://3.17.175.226:5001")
 ```
 
 ### `check_data(data_name)`
