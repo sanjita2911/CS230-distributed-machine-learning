@@ -4,6 +4,10 @@ import pickle
 import time
 import numpy as np
 import pandas as pd
+import glob
+import threading          
+import datetime           
+import psutil
 from kafka_util import create_kafka_consumer,KafkaProducerSingleton
 from config import KAFKA_TRAIN_TOPIC,KAFKA_RESULTS_TOPIC,REDIS_ADDRESS
 from sklearn.base import BaseEstimator
@@ -12,6 +16,7 @@ from logger_util import logger
 from sklearn.base import is_classifier, is_regressor
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, r2_score, mean_squared_error
+from kafka import KafkaProducer
 
 # Dictionary of supported model imports for dynamic loading
 MODEL_IMPORTS = {
@@ -45,9 +50,11 @@ def main():
     # Initialize Redis connection
     # redis_client = redis.Redis(host=REDIS_ADDRESS, port=6379, db=0)
     # Initialize Kafka consumer
-    consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC)
+    consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC,group_id='train-group')
     # Initialize Kafka producer for results
     producer = KafkaProducerSingleton.get_producer()
+    
+    metrics_producer = KafkaProducer(bootstrap_servers='kafka:9092',value_serializer=lambda v: json.dumps(v).encode('utf-8'))
     logger.info("ML Worker started. Waiting for tasks...")
     # Process messages
     for message in consumer:
@@ -61,10 +68,42 @@ def main():
             logger.info(task)
             # Update task status in Redis
             # update_task_status(task_id, "processing")
+            
+            received_at = datetime.datetime.now(datetime.timezone.utc)
+            started_at  = datetime.datetime.now(datetime.timezone.utc)
+            
+            cpu_samples = []
+            mem_samples = []
+            stop_flag = threading.Event()
+            def sampler():
+                while not stop_flag.is_set():
+                    cpu_samples.append(psutil.cpu_percent(interval=None))
+                    mem_samples.append(psutil.virtual_memory().percent)
+                    time.sleep(0.5)  
+                    
+            sampler_thread = threading.Thread(target=sampler)
+            sampler_thread.start()
 
             # # Process the task based on its type
             result = process_task(task)
-            #
+            
+            stop_flag.set()
+            sampler_thread.join()
+            finished_at = datetime.datetime.now(datetime.timezone.utc)
+            cpu_avg = sum(cpu_samples)/len(cpu_samples)
+            mem_avg = sum(mem_samples)/len(mem_samples)
+            
+            metrics = {
+                 "worker_id":       os.getenv("HOSTNAME","unknown"),
+                 "subtask_id":      task_id,
+                 "received_at":     received_at.isoformat()+"Z",
+                 "started_at":      started_at.isoformat()+"Z",
+                 "finished_at":     finished_at.isoformat()+"Z",
+                 "cpu_percent_avg": cpu_avg,
+                 "mem_percent_avg": mem_avg
+            }
+            metrics_producer.send('metrics', metrics)
+            metrics_producer.flush()
             # Send results to Kafka
             result_message = {
                 'subtask_id': task_id,
@@ -108,16 +147,6 @@ def main():
                 logger.error("Failed to report error status")
 
 def train_model(task):
-    """
-    Train a model according to the task specification.
-
-    Args:
-        redis_client: Redis client connection
-        task (dict): Task configuration
-
-    Returns:
-        dict: Training results
-    """
     # Extract task parameters
     algorithm_name = task.get('model_type')
     parameters = task.get('parameters', {})
@@ -226,8 +255,12 @@ def load_dataset(dataset_id, train_param):
     """
     # In a real implementation, this would fetch from a data store like S3, HDFS, etc.
     # For this example, we'll simulate loading from a file based on dataset_id
-    dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"
+    #dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
+    
+    data_dir = f"/mnt/efs/datasets/{dataset_id}"
+    csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
+    dataset_path = csv_paths[0]
 
     # if not os.path.exists(dataset_path):  #need to comment on AWS
     #     # Simulate dataset with random data if file doesn't exist

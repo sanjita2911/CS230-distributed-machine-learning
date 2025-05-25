@@ -5,15 +5,17 @@ import random
 import os
 import threading
 
-import os
+import glob
 import json
 import uuid
-from config import DATASET_PATH
+from config import DATASET_PATH, KAFKA_ADDRESS
 from dataset_util import download_dataset
 from logger_util import logger
 from redis_util import create_redis_client,save_subtasks_to_redis,update_subtask
 from task_handler import create_subtasks,start_result_collector,consume_results
-from kafka_util import KafkaSingleton,send_to_kafka
+from kafka_util import KafkaSingleton,send_to_kafka, get_consumer
+from kafka import TopicPartition
+from kafka import KafkaConsumer
 
 redis_client = create_redis_client()
 
@@ -89,8 +91,14 @@ def check_data(session_id):
     dataset_id = request.args.get("dataset_name")
     # data = request.get_json()
     # dataset_id = data.get('dataset_name')
-    dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
+    # dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
+    
+    data_dir = f"/mnt/efs/datasets/{dataset_id}"
+    csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
+    if not csv_paths:
+         raise FileNotFoundError(f"No CSV files found in {data_dir}")
+    dataset_path = csv_paths[0]
     if os.path.exists(dataset_path):
         return jsonify({'status': f'Dataset {dataset_id} found at {dataset_path}'}), 200
     else:
@@ -156,16 +164,16 @@ def train(session_id):
 
     if not redis_client.sismember("active_sessions", session_id):
         return jsonify({"error": "Invalid session ID"}), 404
-    #
     # get model details
     model_config = request.get_json()
-
-
-    # # job_id = model_config.get('job_id')
-    # # session_id = model_config['session_id']
     dataset_id = model_config.get('dataset_id')
-    dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
-    # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
+    #dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
+    #dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
+    
+    data_dir = f"/mnt/efs/datasets/{dataset_id}"
+    csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
+    dataset_path = csv_paths[0]
+    
     if not os.path.exists(dataset_path):
         return jsonify({'error': f'Dataset {dataset_id} not found, Please Use download_data function'}), 404
     # model_details = model_config['model_details']
@@ -181,7 +189,6 @@ def train(session_id):
     listener_thread = threading.Thread(target=consume_results, args=(subtask_list,session_id), daemon=True)
     listener_thread.start()
     logger.info("Result collector thread started here...")
-
 
     return jsonify({"status": "Model Training Started . . . ."})
 
@@ -208,6 +215,49 @@ def download_best_model(session_id,job_id):
     # Return the model file for download
     return send_file(model_path, as_attachment=True, attachment_filename=f"{data['model_id']}.pkl")
 
+@app.route('/metrics/<session_id>/<job_id>', methods=['GET'])
+def stream_metrics(session_id, job_id):
+    # 1) Validate the session
+    if not redis_client.sismember("active_sessions", session_id):
+        return jsonify({"error": "Invalid session"}), 404
+
+    # 2) Look up all subtask IDs for this job in Redis
+    prefix      = f"active_sessions:{session_id}:jobs:{job_id}:subtasks:{job_id}-subtask-"
+    keys        = redis_client.keys(prefix + "*")
+    subtask_ids = [k.split(":")[-1] for k in keys]
+    if not subtask_ids:
+        return jsonify({"error": "No subtasks found"}), 404
+
+    # 3) Spin up a fresh Kafka consumer group so we read every metric ever produced
+    group_name = f"metrics_{session_id}_{job_id}"
+    kafka_address = KAFKA_ADDRESS  # however you configure it
+    consumer = KafkaConsumer(
+        bootstrap_servers=[kafka_address],
+        group_id=group_name,
+        auto_offset_reset='earliest',
+        enable_auto_commit=False,
+        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+    )
+
+    # 4) Explicitly assign all partitions and rewind to the start
+    parts = [TopicPartition('metrics', p) for p in consumer.partitions_for_topic('metrics')]
+    consumer.assign(parts)
+    consumer.seek_to_beginning()
+
+    # 5) Consume messages until we’ve collected one record per subtask
+    seen = {}
+    for msg in consumer:
+        record = msg.value
+        sid    = record['subtask_id']
+        if sid in subtask_ids and sid not in seen:
+            seen[sid] = record
+            if len(seen) == len(subtask_ids):
+                break
+
+    consumer.close()
+
+    # 6) Return the collected metrics as a JSON array
+    return jsonify(list(seen.values())), 200
 
 if __name__ == "__main__":
     logger.info("Starting Flask server...")
