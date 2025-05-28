@@ -19,6 +19,21 @@ services:
     networks:
       - mlnet
 
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # MinIO Console UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    command: server --console-address ":9001" /data
+    networks:
+      - mlnet
+
   zookeeper:
     image: wurstmeister/zookeeper
     ports:
@@ -69,6 +84,31 @@ services:
       - FLASK_DEBUG=1
       - FLASK_APP=app/master.py
       - PYTHONUNBUFFERED=1
+    networks:
+      - mlnet
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Scheduler.Dockerfile
+    ports:
+      - "8000:8000"  # FastAPI default port
+    volumes:
+      - ./aws-prod/scheduler:/app
+      - shared_volume:/mnt/efs  # Optional shared storage
+    depends_on:
+      - kafka
+      - master
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:9092
+      - SCHED_INGRESS_TOPIC=train-tasks
+      - SCHED_EGRESS_TOPIC=train-assignments
+      - WORKER_STATUS_TOPIC=train-status
+      - WORKER_MEM_MB=16000
+      - ALGO_WEIGHT_JSON={"xgboost":1.3,"svm":1.1}
+      - WORKER_IDS=W-1,W-2,W-3,W-4
+      - RUNTIME_MODEL_PATH=/mnt/efs/runtime_model.joblib
+    command: uvicorn scheduler:app --host 0.0.0.0 --port 8000
     networks:
       - mlnet
 
@@ -140,3 +180,6 @@ volumes:
   shared_volume:
     name: shared-storage
     external: false  # Ensures Docker manages it
+  minio_storage:
+    name: s3-storage-volume
+    external: false

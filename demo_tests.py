@@ -19,9 +19,9 @@ print(data_status['status'], '\n')
 
 
 # training job
-lr = RandomForestClassifier(n_estimators=5)
+rf = RandomForestClassifier(n_estimators=5)
 job_response = task_manager.train(
-    lr,
+    rf,
     dataset_name="iris",
     train_params={
         'test_size': 0.25,
@@ -33,7 +33,7 @@ job_response = task_manager.train(
 )
 
 
-
+lr = LogisticRegression()
 # gridsearch job
 param_grid = {
     'C': [0.1, 1.0, 10.0, 100],
