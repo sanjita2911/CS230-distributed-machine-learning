@@ -38,7 +38,7 @@ services:
     environment:
       KAFKA_ADVERTISED_HOST_NAME: kafka
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_CREATE_TOPICS: "train:4:1,result:4:1"
+      KAFKA_CREATE_TOPICS: "train:4:1,result:1:1,metrics:1:1"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     depends_on:
       zookeeper:
@@ -59,7 +59,7 @@ services:
       - "5001:5001"
     volumes:
       - ./master:/app
-      - shared_volume:/mnt/efs  # Master gets RW access
+      - shared_volume:/mnt/efs/
     depends_on:
       - kafka
       - storage

@@ -76,7 +76,7 @@ class KafkaSingleton:
             KafkaSingleton._producer.close()
             KafkaSingleton._producer = None  # Mark as closed
 
-def get_consumer(topic):
+def get_consumer(topic,group_id=None):
     """Create and return a Kafka consumer for the task_results topic."""
     try:
         # kafka_address = get_kafka_address(REGION) # Un comment on AWS
@@ -84,6 +84,7 @@ def get_consumer(topic):
         consumer = KafkaConsumer(
             topic,
             bootstrap_servers=[kafka_address],
+            group_id=group_id,  
             auto_offset_reset='earliest',
             value_deserializer=lambda x: json.loads(x.decode('utf-8'))
         )

@@ -45,7 +45,7 @@ class KafkaProducerSingleton:
         print(response)
         return response['Parameter']['Value']
 
-def create_kafka_consumer(topic):
+def create_kafka_consumer(topic,group_id='master_group'):
     """Create and return a Kafka consumer for the task_results topic."""
     try:
         # kafka_address = get_kafka_address(REGION) # Un comment on AWS
@@ -53,7 +53,7 @@ def create_kafka_consumer(topic):
         consumer = KafkaConsumer(
             topic,
             bootstrap_servers=[kafka_address],
-            group_id='master_group',
+            group_id=group_id,
             auto_offset_reset='earliest',
             enable_auto_commit=False,
             value_deserializer=lambda x: json.loads(x.decode('utf-8'))

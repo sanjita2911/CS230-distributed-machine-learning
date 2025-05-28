@@ -6,6 +6,7 @@ from kafka_util import get_consumer
 import json
 from config import KAFKA_RESULTS_TOPIC, KAFKA_ADDRESS
 from redis_util import create_redis_client,update_subtask
+
 import time
 
 def start_result_collector():
@@ -260,8 +261,3 @@ def aggregate_results(aggregated_results):
 
         best_result= sorted_results[0] if sorted_results else None
         return best_result
-
-
-
-
-
