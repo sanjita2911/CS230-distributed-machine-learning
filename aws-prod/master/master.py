@@ -4,7 +4,8 @@ import time
 import random
 import os
 import threading
-
+from flask import Flask, request, jsonify
+from dataset_util import preprocess_data
 import glob
 import json
 import uuid
@@ -258,12 +259,6 @@ def stream_metrics(session_id, job_id):
 
     # 6) Return the collected metrics as a JSON array
     return jsonify(list(seen.values())), 200
-
-
-from flask import Flask, request, jsonify
-from dataset_util import preprocess_data_spark
-
-app = Flask(name)
 
 @app.route('/preprocess', methods=['POST'])
 def preprocess():

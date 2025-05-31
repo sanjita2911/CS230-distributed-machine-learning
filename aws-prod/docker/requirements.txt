@@ -8,3 +8,4 @@ kafka-python
 datasets
 boto3
 kaggle
+pyspark
