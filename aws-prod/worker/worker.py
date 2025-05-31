@@ -17,7 +17,12 @@ from sklearn.base import is_classifier, is_regressor
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, r2_score, mean_squared_error
 from kafka import KafkaProducer
+from redis_util import create_redis_client
 
+r = create_redis_client()
+worker_id = None
+HEARTBEAT_INTERVAL = 5
+HEARTBEAT_TTL = HEARTBEAT_INTERVAL * 3
 # Dictionary of supported model imports for dynamic loading
 MODEL_IMPORTS = {
     # Classifiers
@@ -42,13 +47,45 @@ MODEL_IMPORTS = {
     'Imputer': 'from sklearn.impute import SimpleImputer'
 }
 
+def claim_worker_id():
+    while True:
+        # Get the lowest score worker id
+        available = r.zrange("available_worker_ids", 0, 0)
+        if available:
+            worker_id = available[0].decode() if isinstance(available[0], bytes) else available[0]
+            key = f"worker_claims:{worker_id}"
+            if not r.exists(key):
+                # Claim it: remove from available, add to active, set heartbeat
+                r.zrem("available_worker_ids", worker_id)
+                r.sadd("active_worker_ids", worker_id)
+                r.set(key, "active", ex=HEARTBEAT_TTL)
+                logger.info(f"[{worker_id}] Successfully claimed!")
+                return worker_id
+            else:
+                logger.info(f"[{worker_id}] Already in use, trying again...")
+        else:
+            logger.info("No available worker IDs, retrying in 5s...")
+            time.sleep(5)
+
+def heartbeat(worker_id):
+    while True:
+        try:
+            r.set(f"worker_claims:{worker_id}", "active", ex=HEARTBEAT_TTL)
+            print(f"[{worker_id}] Heartbeat")
+        except Exception as e:
+            print(f"[{worker_id}] Heartbeat error: {e}")
+        time.sleep(HEARTBEAT_INTERVAL)
+
 def main():
     """
     Main worker function that consumes ML training tasks from Kafka,
     processes them, and sends results back.
     """
+    global worker_id
     # Initialize Redis connection
-    # redis_client = redis.Redis(host=REDIS_ADDRESS, port=6379, db=0)
+    worker_id = claim_worker_id()
+    logger.info(f"Starting worker with ID : {worker_id}.....")
+    threading.Thread(target=heartbeat, args=(worker_id,), daemon=True).start()
     # Initialize Kafka consumer
     consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC,group_id='train-group')
     # Initialize Kafka producer for results
