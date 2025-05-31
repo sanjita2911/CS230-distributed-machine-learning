@@ -9,7 +9,7 @@ import glob
 import json
 import uuid
 from config import DATASET_PATH, KAFKA_ADDRESS
-from dataset_util import download_dataset
+from dataset_util import download_dataset, preprocess_data
 from logger_util import logger
 from redis_util import create_redis_client,save_subtasks_to_redis,update_subtask
 from task_handler import create_subtasks,start_result_collector,consume_results
@@ -258,6 +258,25 @@ def stream_metrics(session_id, job_id):
 
     # 6) Return the collected metrics as a JSON array
     return jsonify(list(seen.values())), 200
+
+
+from flask import Flask, request, jsonify
+from dataset_util import preprocess_data_spark
+
+app = Flask(name)
+
+@app.route('/preprocess', methods=['POST'])
+def preprocess():
+    data = request.get_json()
+    input_s3_path = data['input_s3_path']
+    yaml_s3_path = data['yaml_s3_path']
+    output_s3_path = data['output_s3_path']
+
+    preprocess_data(input_s3_path, yaml_s3_path, output_s3_path)
+
+    return jsonify({'status': 'Preprocessing completed', 'output_s3_path': output_s3_path})
+
+
 
 if __name__ == "__main__":
     logger.info("Starting Flask server...")
