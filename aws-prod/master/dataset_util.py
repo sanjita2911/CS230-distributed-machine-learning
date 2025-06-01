@@ -79,23 +79,23 @@ def download_data_and_yaml(yaml_s3_path, data_s3_path):
     bucket, yaml_key = yaml_s3_path.replace("s3://", "").split("/", 1)
     s3 = boto3.client('s3')
     obj = s3.get_object(Bucket=bucket, Key=yaml_key)
-    yaml = yaml.safe_load(obj['Body'].read())
+    config = yaml.safe_load(obj['Body'].read())
     df = spark.read.csv(data_s3_path, header=True, inferSchema=True)
 
-    return df, yaml
+    return df, config
 
 
-def preprocess_data(df, yaml):
+def preprocess_data(df, config):
     
     pipeline_stages = []
 
     # 1. Drop null rows
-    if yaml.get("drop_null", False):
+    if config.get("drop_null", False):
         df = df.na.drop()
 
     # 2. Impute missing values
-    if "impute" in yaml:
-        for col, strategy in yaml["impute"].items():
+    if "impute" in config:
+        for col, strategy in config["impute"].items():
             if strategy == "mean":
                 mean_val = df.select(F.mean(F.col(col))).first()[0]
                 df = df.fillna({col: mean_val})
@@ -109,8 +109,8 @@ def preprocess_data(df, yaml):
                 df = df.fillna({col: strategy})
 
     # 3. Outlier detection + handling
-    if "outliers" in yaml:
-        for col, method in yaml["outliers"].items():
+    if "outliers" in config:
+        for col, method in config["outliers"].items():
             if method == "remove":
                 q1, q3 = df.approxQuantile(col, [0.25, 0.75], 0.05)
                 iqr = q3 - q1
@@ -123,27 +123,27 @@ def preprocess_data(df, yaml):
                 df = df.withColumn(col, F.when(F.col(col) < lower, lower).when(F.col(col) > upper, upper).otherwise(F.col(col)))
 
     # 4. Drop columns
-    if "drop_columns" in yaml:
-        df = df.drop(*yaml["drop_columns"])
+    if "drop_columns" in config:
+        df = df.drop(*config["drop_columns"])
 
     # 5. Drop duplicates
-    if yaml.get("drop_duplicates", False):
+    if config.get("drop_duplicates", False):
         df = df.dropDuplicates()
 
     # 6. Categorical encoding
-    if "categorical" in yaml:
-        for col in yaml["categorical"]:
+    if "categorical" in config:
+        for col in config["categorical"]:
             indexer = StringIndexer(inputCol=col, outputCol=f"{col}_index", handleInvalid='keep')
             encoder = OneHotEncoder(inputCols=[f"{col}_index"], outputCols=[f"{col}_encoded"])
             pipeline_stages += [indexer, encoder]
 
     # 7. Feature scaling
-    if "scale" in yaml:
-        input_cols = yaml["scale"].get("columns", [])
+    if "scale" in config:
+        input_cols = config["scale"].get("columns", [])
         output_cols = [f"{col}_scaled" for col in input_cols]
         assembler = VectorAssembler(inputCols=input_cols, outputCol="features")
 
-        if yaml["scale"]["method"] == "standard":
+        if config["scale"]["method"] == "standard":
             scaler = StandardScaler(inputCol="features", outputCol="scaled_features", withMean=True, withStd=True)
         else:
             scaler = MinMaxScaler(inputCol="features", outputCol="scaled_features")
