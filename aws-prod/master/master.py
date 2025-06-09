@@ -12,9 +12,9 @@ import uuid
 from config import DATASET_PATH, KAFKA_ADDRESS
 from dataset_util import download_dataset, preprocess_data
 from logger_util import logger
-from redis_util import create_redis_client,save_subtasks_to_redis,update_subtask
-from task_handler import create_subtasks,start_result_collector,consume_results
-from kafka_util import KafkaSingleton,send_to_kafka, get_consumer
+from redis_util import create_redis_client, save_subtasks_to_redis, update_subtask
+from task_handler import create_subtasks, start_result_collector, consume_results
+from kafka_util import KafkaSingleton, send_to_kafka, get_consumer
 from kafka import TopicPartition
 from kafka import KafkaConsumer
 
@@ -23,6 +23,7 @@ redis_client = create_redis_client()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
 
 @app.route("/")
 def home():
@@ -40,6 +41,7 @@ def home():
         ]
     })
 
+
 @app.route("/health", methods=["POST"])
 def health():
     """Health check endpoint."""
@@ -48,12 +50,14 @@ def health():
         "timestamp": time.time()
     })
 
+
 @app.route("/create_session", methods=["POST"])
 def create_session():
     """Creates a new user session and stores it in Redis."""
     session_id = str(uuid.uuid4())
     redis_client.sadd("active_sessions", session_id)  # Add to active sessions
     return jsonify({"message": "Session created", "session_id": session_id}), 201
+
 
 @app.route('/download_data/<session_id>', methods=['POST'])
 def download_data(session_id):
@@ -94,16 +98,17 @@ def check_data(session_id):
     # dataset_id = data.get('dataset_name')
     # dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
-    
+
     data_dir = f"/mnt/efs/datasets/{dataset_id}"
     csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
     if not csv_paths:
-         raise FileNotFoundError(f"No CSV files found in {data_dir}")
+        raise FileNotFoundError(f"No CSV files found in {data_dir}")
     dataset_path = csv_paths[0]
     if os.path.exists(dataset_path):
         return jsonify({'status': f'Dataset {dataset_id} found at {dataset_path}'}), 200
     else:
         return jsonify({'error': f'Dataset {dataset_id} not found, Please Use download_data function'}), 404
+
 
 @app.route('/check_status/<session_id>/<job_id>', methods=['GET'])
 def check_status(session_id, job_id):
@@ -121,10 +126,12 @@ def check_status(session_id, job_id):
     if not job_status:
         return jsonify({"error": f"Job {job_id} not found."}), 404
     # Get pending tasks for the session
-    pending_tasks = int(redis_client.get(f"session:{session_id}:tasks_pending") or 0)
+    pending_tasks = int(redis_client.get(
+        f"session:{session_id}:tasks_pending") or 0)
 
     # Get the total number of subtasks for the job
-    subtask_keys = redis_client.keys(f"active_sessions:{session_id}:jobs:{job_id}:subtasks:{job_id}-subtask-*")
+    subtask_keys = redis_client.keys(
+        f"active_sessions:{session_id}:jobs:{job_id}:subtasks:{job_id}-subtask-*")
     total_subtasks = len(subtask_keys)
 
     # If the job is completed, fetch the job results
@@ -135,13 +142,13 @@ def check_status(session_id, job_id):
 
         job_result = json.loads(job_result)
         response = {"session_id": session_id,
-            "tasks_pending": pending_tasks,
-            "job_id": job_id,
-            "job_status": job_status,
-            "job_result": job_result,  # Include job results in the response
-            "total_subtasks": total_subtasks  # Total subtasks for the status bar
-        }
-        if total_subtasks>1:
+                    "tasks_pending": pending_tasks,
+                    "job_id": job_id,
+                    "job_status": job_status,
+                    "job_result": job_result,  # Include job results in the response
+                    "total_subtasks": total_subtasks  # Total subtasks for the status bar
+                    }
+        if total_subtasks > 1:
             response['best_result'] = job_result.get('best_result')
             logger.info(job_result)
             return jsonify(response)
@@ -168,13 +175,13 @@ def train(session_id):
     # get model details
     model_config = request.get_json()
     dataset_id = model_config.get('dataset_id')
-    #dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
-    #dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
-    
+    # dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"  # On AWS Comment
+    # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
+
     data_dir = f"/mnt/efs/datasets/{dataset_id}"
     csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
     dataset_path = csv_paths[0]
-    
+
     if not os.path.exists(dataset_path):
         return jsonify({'error': f'Dataset {dataset_id} not found, Please Use download_data function'}), 404
     # model_details = model_config['model_details']
@@ -183,18 +190,20 @@ def train(session_id):
     subtasks = create_subtasks(model_config)
     subtask_list = [task['subtask_id'] for task in subtasks]
     logger.info(subtasks)
-    redis_status = save_subtasks_to_redis(subtasks,redis_client)
+    redis_status = save_subtasks_to_redis(subtasks, redis_client)
     logger.info(redis_status)
-    send_to_kafka(subtasks,producer)
+    send_to_kafka(subtasks, producer)
 
-    listener_thread = threading.Thread(target=consume_results, args=(subtask_list,session_id), daemon=True)
+    listener_thread = threading.Thread(
+        target=consume_results, args=(subtask_list, session_id), daemon=True)
     listener_thread.start()
     logger.info("Result collector thread started here...")
 
     return jsonify({"status": "Model Training Started . . . ."})
 
+
 @app.route('/download_model/<session_id>/<job_id>', methods=['POST'])
-def download_best_model(session_id,job_id):
+def download_best_model(session_id, job_id):
     # Simulate fetching the best result for a given job_id
     if not redis_client.sismember("active_sessions", session_id):
         return jsonify({"error": "Invalid session ID"}), 404
@@ -216,6 +225,7 @@ def download_best_model(session_id,job_id):
     # Return the model file for download
     return send_file(model_path, as_attachment=True, attachment_filename=f"{data['model_id']}.pkl")
 
+
 @app.route('/metrics/<session_id>/<job_id>', methods=['GET'])
 def stream_metrics(session_id, job_id):
     # 1) Validate the session
@@ -223,8 +233,8 @@ def stream_metrics(session_id, job_id):
         return jsonify({"error": "Invalid session"}), 404
 
     # 2) Look up all subtask IDs for this job in Redis
-    prefix      = f"active_sessions:{session_id}:jobs:{job_id}:subtasks:{job_id}-subtask-"
-    keys        = redis_client.keys(prefix + "*")
+    prefix = f"active_sessions:{session_id}:jobs:{job_id}:subtasks:{job_id}-subtask-"
+    keys = redis_client.keys(prefix + "*")
     subtask_ids = [k.split(":")[-1] for k in keys]
     if not subtask_ids:
         return jsonify({"error": "No subtasks found"}), 404
@@ -241,7 +251,8 @@ def stream_metrics(session_id, job_id):
     )
 
     # 4) Explicitly assign all partitions and rewind to the start
-    parts = [TopicPartition('metrics', p) for p in consumer.partitions_for_topic('metrics')]
+    parts = [TopicPartition('metrics', p)
+             for p in consumer.partitions_for_topic('metrics')]
     consumer.assign(parts)
     consumer.seek_to_beginning()
 
@@ -249,7 +260,7 @@ def stream_metrics(session_id, job_id):
     seen = {}
     for msg in consumer:
         record = msg.value
-        sid    = record['subtask_id']
+        sid = record['subtask_id']
         if sid in subtask_ids and sid not in seen:
             seen[sid] = record
             if len(seen) == len(subtask_ids):
@@ -257,8 +268,12 @@ def stream_metrics(session_id, job_id):
 
     consumer.close()
 
+    with open("metrics.json", "w") as f:
+        json.dump(list(seen.values()), f, indent=4)
+
     # 6) Return the collected metrics as a JSON array
     return jsonify(list(seen.values())), 200
+
 
 @app.route('/preprocess', methods=['POST'])
 def preprocess():
@@ -270,7 +285,6 @@ def preprocess():
     preprocess_data(input_s3_path, yaml_s3_path, output_s3_path)
 
     return jsonify({'status': 'Preprocessing completed', 'output_s3_path': output_s3_path})
-
 
 
 if __name__ == "__main__":

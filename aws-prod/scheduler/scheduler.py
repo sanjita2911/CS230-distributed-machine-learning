@@ -43,18 +43,17 @@ from logger_util import logger
 import joblib
 import pandas as pd
 # from kafka_util import KafkaSingleton
-from kafka import KafkaProducer,KafkaConsumer
+from kafka import KafkaProducer, KafkaConsumer
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.ensemble import GradientBoostingRegressor
-from scheduler_service import Scheduler, create_worker_id_pool, monitor_workers
+from scheduler_service import Scheduler, create_worker_id_pool
 
 from redis_util import create_redis_client
 
 
-NUM_WORKERS = 10
-CHECK_INTERVAL = 2  # seconds
-
+NUM_WORKERS = 4
+# CHECK_INTERVAL = 2  # seconds
 
 
 BROKERS = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
@@ -69,17 +68,21 @@ WORKER_MEM_MB_DEFAULT = int(os.getenv("WORKER_MEM_MB", "16000"))
 app = FastAPI(title="Distributed‑ML Scheduler", version="2.0")
 _scheduler: Optional[Scheduler] = None
 
+
 @app.on_event("startup")
 async def _startup():
     global _scheduler
-    _worker_ids = create_worker_id_pool()
-    _scheduler = Scheduler(_worker_ids)
+   # _worker_ids = create_worker_id_pool()
+    _scheduler = Scheduler()
     asyncio.create_task(_scheduler.run())
-    threading.Thread(target=monitor_workers, args=(_scheduler,CHECK_INTERVAL), daemon=True).start()
+    # threading.Thread(target=monitor_workers, args=(
+    #     _scheduler, CHECK_INTERVAL), daemon=True).start()
     logger.info("Scheduler started with workers..... ")
+
 
 class WorkerPatch(BaseModel):
     mem_capacity_mb: Optional[int] = None
+
 
 @app.patch("/workers/{worker_id}")
 async def patch_worker(worker_id: str, patch: WorkerPatch):
@@ -90,9 +93,11 @@ async def patch_worker(worker_id: str, patch: WorkerPatch):
         w.mem_capacity_mb = patch.mem_capacity_mb
     return w
 
+
 @app.get("/workers")
 async def workers():
     return list(_scheduler.workers.values())  # type: ignore
+
 
 @app.get("/health")
 async def health():
@@ -106,6 +111,7 @@ def _shutdown(*_):
         _scheduler.status_consumer.close()
         _scheduler.producer.flush()
     sys.exit(0)
+
 
 signal.signal(signal.SIGINT, _shutdown)
 signal.signal(signal.SIGTERM, _shutdown)

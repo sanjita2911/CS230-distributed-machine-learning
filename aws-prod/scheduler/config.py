@@ -11,6 +11,8 @@
 DATASET_PATH = "/mnt/efs/datasets"
 REGION = 'us-east-2'
 KAFKA_TRAIN_TOPIC = 'train'
+KAFKA_SCHEDULER_INGRESS_TOPIC = 'tasks'
+KAFKA_METRICS_TOPIC = 'metrics'
 KAFKA_RESULTS_TOPIC = 'result'
 KAFKA_ADDRESS = 'kafka:9092'  # on docker only
 REDIS_ADDRESS = 'redis'  # on docker only
