@@ -23,6 +23,9 @@ r = create_redis_client()
 worker_id = None
 # HEARTBEAT_INTERVAL = 5
 # HEARTBEAT_TTL = HEARTBEAT_INTERVAL * 3
+# worker_id = os.getenv("WORKER_ID")
+HEARTBEAT_INTERVAL = 5
+HEARTBEAT_TTL = HEARTBEAT_INTERVAL * 3
 # Dictionary of supported model imports for dynamic loading
 MODEL_IMPORTS = {
     # Classifiers
