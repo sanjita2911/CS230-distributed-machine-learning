@@ -1,3 +1,11 @@
+from config import KAFKA_METRICS_TOPIC, KAFKA_SCHEDULER_INGRESS_TOPIC, KAFKA_TRAIN_TOPIC
+from redis_util import create_redis_client
+from sklearn.ensemble import GradientBoostingRegressor
+from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from kafka import KafkaProducer, KafkaConsumer
+import pandas as pd
+import joblib
 import asyncio
 import json
 import redis
@@ -9,26 +17,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 from logger_util import logger
-import joblib
-import pandas as pd
+logger.info("🔧 Logger initialized correctly in scheduler_service.py")
 # from kafka_util import KafkaSingleton
-from kafka import KafkaProducer, KafkaConsumer
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from sklearn.ensemble import GradientBoostingRegressor
-from redis_util import create_redis_client
 
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
-NUM_WORKERS = 10
-BATCH_SIZE = 128
+NUM_WORKERS = 4
+BATCH_SIZE = 2
 
 r = create_redis_client()
 
 BROKERS = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
-INGRESS_TOPIC = os.getenv("SCHED_INGRESS_TOPIC", "tasks")
-EGRESS_TOPIC = os.getenv("SCHED_EGRESS_TOPIC", "train")
-STATUS_TOPIC = os.getenv("WORKER_STATUS_TOPIC", "metrics")
+INGRESS_TOPIC = KAFKA_SCHEDULER_INGRESS_TOPIC
+EGRESS_TOPIC = KAFKA_TRAIN_TOPIC
+STATUS_TOPIC = KAFKA_METRICS_TOPIC
 MODEL_PATH = Path(os.getenv("RUNTIME_MODEL_PATH", "runtime_model.joblib"))
 
 WORKER_MEM_MB_DEFAULT = int(os.getenv("WORKER_MEM_MB", "16000"))
@@ -39,6 +41,7 @@ try:
 except json.JSONDecodeError:
     ALGO_WEIGHT = {}
 
+
 class RuntimePredictor:
     """GBRT model with online refresh."""
 
@@ -47,8 +50,9 @@ class RuntimePredictor:
             self._model = joblib.load(MODEL_PATH)
             logger.info("Runtime model loaded from %s", MODEL_PATH)
         else:
-            self._model = GradientBoostingRegressor(n_estimators=1, max_depth=1)
-            self._model.fit([[0, 0, 0, 0, 0]], [60])  # dummy fit
+            self._model = GradientBoostingRegressor(
+                n_estimators=1, max_depth=1)
+            self._model.fit([[0, 0, 0, 0, 0, 0, 0, 0]], [60])  # dummy fit
             logger.warning("Runtime model cold‑started with default weights")
         self._buffer: List[Dict] = []
 
@@ -59,6 +63,9 @@ class RuntimePredictor:
             task.get("n_cols", 0),  # cols
             task.get("hp_grid_size", 1),  # trials
             task.get("mem_mb", 1024),  # memory MB
+            task.get("cpu_avg", 1.5),
+            hash(task.get("metric_name", "")) % 1000,
+            task.get("metric_value", 0)
         ]
 
     def predict(self, task: dict) -> float:
@@ -69,9 +76,14 @@ class RuntimePredictor:
 
     def observe(self, task: dict, actual_runtime: float):
         self._buffer.append({"x": self._features(task), "y": actual_runtime})
+
+        logger.info(
+            f"📦 Buffer size: {len(self._buffer)} | Contents: {self._buffer}")
+
         if len(self._buffer) >= BATCH_SIZE:
             df = pd.DataFrame(self._buffer)
             self._model.fit(list(df["x"].values), list(df["y"].values))
+
             joblib.dump(self._model, MODEL_PATH)
             logger.info("Runtime model retrained on %d samples", len(df))
             self._buffer.clear()
@@ -87,7 +99,7 @@ class WorkerState(BaseModel):
     mem_load_mb: int = 0  # queued memory usage
     mem_capacity_mb: int = WORKER_MEM_MB_DEFAULT
     speed_factor: float = 1.0  # >1 means faster than baseline
-    last_heartbeat: datetime = datetime.now(timezone.utc)
+    # last_heartbeat: datetime = datetime.now(timezone.utc)
 
     def effective_finish_time(self) -> float:
         """Return load adjusted by speed."""
@@ -101,13 +113,16 @@ class WorkerState(BaseModel):
 # ----------------------------------------------------------------------------
 
 class Scheduler:
-    def __init__(self, worker_ids: List[str]):
-        if not worker_ids:
-            raise ValueError("Need at least one worker")
-        self.active_worker_ids: List[str] = worker_ids.copy()
-        self.worker_id_map = {self.active_worker_ids[i]: i for i in range(NUM_WORKERS)}
-        self.workers: Dict[str, WorkerState] = {
-            wid: WorkerState(worker_id=wid) for wid in worker_ids
+    def __init__(self):
+        # if not worker_ids:
+        #     raise ValueError("Need at least one worker")
+        self.active_worker_ids = create_worker_id_pool()
+        self.task_estimates = {}
+        self.worker_id_map = {
+            wid: idx for idx, wid in enumerate(self.active_worker_ids)
+        }
+        self.workers = {
+            wid: WorkerState(worker_id=wid) for wid in self.active_worker_ids
         }
         self.predictor = RuntimePredictor()
 
@@ -126,7 +141,7 @@ class Scheduler:
             STATUS_TOPIC,
             bootstrap_servers=[BROKERS],
             group_id="scheduler-status-group",
-            auto_offset_reset="latest",
+            auto_offset_reset="earliest",
             enable_auto_commit=True,
             value_deserializer=lambda m: m.decode('utf-8')
         )
@@ -152,11 +167,22 @@ class Scheduler:
     def _select_worker(self, est_runtime: float, mem_mb: int) -> WorkerState:
         eligible = self._eligible_workers(mem_mb)
         if not eligible:
-            # Fallback: ignore memory but log warning
-            logger.warning("No workers with enough memory; falling back to min effective load")
+            logger.warning(
+                "No workers with enough memory; falling back to min effective load")
             eligible = list(self.workers.values())
         # Choose min of (effective finish time) + est_runtime
-        return min(eligible, key=lambda w: w.effective_finish_time() + est_runtime)
+        score_map = {}
+        for worker in eligible:
+            adjusted_runtime = est_runtime / max(worker.speed_factor, 1e-3)
+            score = worker.effective_finish_time() + adjusted_runtime
+            score_map[worker.worker_id] = {
+                "score": score,
+                "load": worker.load_seconds,
+                "mem_used": worker.mem_load_mb,
+                "speed": worker.speed_factor
+            }
+        best_worker = min(score_map, key=lambda wid: score_map[wid]["score"])
+        return self.workers[best_worker], score_map
 
     # --------------------------------------------------------------
     # Kafka loops
@@ -170,28 +196,48 @@ class Scheduler:
         )
 
     def _ingress_loop(self):
+        logger.info("🔁 Starting _ingress_loop ...")
         while True:
             records = self.consumer.poll()
+            if records:
+                logger.info("Received Kafka messages: %s", records)
             for tp, messages in records.items():
                 for msg in messages:
                     try:
                         task = json.loads(msg.value)
                         mem_mb = int(task.get("mem_mb", 1024))
                         est = self.predictor.predict(task)
-                        worker = self._select_worker(est, mem_mb)
+                        subtask_id = task.get("subtask_id")
+                        self.task_estimates[subtask_id] = est
+                        worker, score_map = self._select_worker(est, mem_mb)
 
                         worker.load_seconds += est
                         worker.mem_load_mb += mem_mb
 
                         self.producer.send(
                             topic=EGRESS_TOPIC,
-                            key=worker.worker_id.encode(),
-                            value=msg.value,
+                            key=worker.worker_id,
+                            value=json.dumps(task),
                             headers=msg.headers
                         )
 
-                        logger.info("Task %s → %s  est=%.1fs mem=%dMB", task.get("task_id"), worker.worker_id, est,
-                                    mem_mb)
+                        logger.info("\nScheduling Task: %s",
+                                    task.get("subtask_id", "unknown"))
+                        logger.info("Predicted Runtime: %.2f sec", est)
+                        logger.info("Task Memory: %d MB", mem_mb)
+
+                        for wid, info in score_map.items():
+                            logger.info(
+                                "Worker %s → Score: %.2f | Load: %.1fs | Mem Used: %dMB | Speed: %.2f",
+                                wid,
+                                info["score"],
+                                info["load"],
+                                info["mem_used"],
+                                info["speed"]
+                            )
+                        logger.info("Selected Worker: %s", worker.worker_id)
+                        logger.info(
+                            "Task sent to topic '%s' with key '%s'", EGRESS_TOPIC, worker.worker_id)
                     except Exception:
                         logger.exception("Failed to schedule task")
 
@@ -202,68 +248,88 @@ class Scheduler:
                 if not records:
                     continue
 
+                logger.info("✅ Fetched raw records from metrics:")
+                logger.info(records)
                 for tp, msgs in records.items():
                     for msg in msgs:
                         try:
                             status = json.loads(msg.value)
                             wid = status.get("worker_id")
-                            runtime = float(status.get("runtime", 0))
-                            mem_mb = int(status.get("mem_mb", 0))
+                            start = datetime.fromisoformat(
+                                status["started_at"].replace("Z", ""))
+                            end = datetime.fromisoformat(
+                                status["finished_at"].replace("Z", ""))
+                            runtime = (end - start).total_seconds()
+                            mem_mb = int(status.get("mem_percent_avg", 0)
+                                         * WORKER_MEM_MB_DEFAULT / 100)
                             succeeded = status.get("status") == "DONE"
-                            est_runtime = float(status.get("est_runtime", runtime))
 
                             if wid not in self.workers or not succeeded:
                                 continue
 
                             w = self.workers[wid]
-                            w.load_seconds = max(0.0, w.load_seconds - runtime)
+                            subtask_id = status.get("subtask_id")
+                            est_runtime = self.task_estimates.get(
+                                subtask_id, runtime)
+                            w.load_seconds = max(
+                                0.0, w.load_seconds - runtime)
+
                             w.mem_load_mb = max(0, w.mem_load_mb - mem_mb)
-                            w.last_heartbeat = datetime.now(timezone.utc)
+                            # w.last_heartbeat = datetime.now(timezone.utc)
+                            # subtask_id = status.get("subtask_id")
+                            # est_runtime = self.task_estimates.get(
+                            #     subtask_id, runtime)
 
                             ratio = (est_runtime + 1e-6) / (runtime + 1e-6)
-                            w.speed_factor = max(0.2, min(5.0, 0.8 * w.speed_factor + 0.2 * ratio))
+                            w.speed_factor = max(
+                                0.2, min(5.0, 0.8 * w.speed_factor + 0.2 * ratio))
+                            logger.info("Here")
+                            self.task_estimates.pop(subtask_id, None)
 
                             self.predictor.observe(status, runtime)
-                            logger.info("Worker %s DONE task %s runtime=%.1fs ratio=%.2f speed=%.2f",
-                                        wid, status.get("task_id"), runtime, ratio, w.speed_factor)
+                            logger.info("Worker %s updated: Load=%.1fs | Mem=%dMB | Speed=%.2f | Score=%.2f",
+                                        wid, w.load_seconds, w.mem_load_mb, w.speed_factor, w.effective_finish_time())
 
                         except Exception:
                             logger.exception("Error processing status message")
             except Exception:
                 logger.exception("Error in status loop poll")
 
-    def check_alive_workers(self):
-        active_ids = list(r.smembers("active_worker_ids"))
-        alive = []
-        dead = []
+    # def check_alive_workers(self):
+    #     active_ids = list(r.smembers("active_worker_ids"))
+    #     alive = []
+    #     dead = []
 
-        for wid_bytes in active_ids:
-            wid = wid_bytes.decode() if isinstance(wid_bytes, bytes) else wid_bytes
-            if r.exists(f"worker_claims:{wid}"):
-                alive.append(wid)
-            else:
-                dead.append(wid)
-                r.srem("active_worker_ids", wid)
-                # Reclaim with original order score in sorted set
-                score = self.worker_id_map.get(wid, 10000)  # large default if missing
-                r.zadd("available_worker_ids", {wid: score})
-                logger.info(f"Worker {wid} is dead. Reclaiming...")
+    #     for wid_bytes in active_ids:
+    #         wid = wid_bytes.decode() if isinstance(wid_bytes, bytes) else wid_bytes
+    #         if r.exists(f"worker_claims:{wid}"):
+    #             alive.append(wid)
+    #         else:
+    #             dead.append(wid)
+    #             r.srem("active_worker_ids", wid)
+    #             # Reclaim with original order score in sorted set
+    #             score = self.worker_id_map.get(
+    #                 wid, 10000)  # large default if missing
+    #             r.zadd("available_worker_ids", {wid: score})
+    #             logger.info(f"Worker {wid} is dead. Reclaiming...")
 
-        self.active_worker_ids = alive
-        logger.info(f"Alive workers: {alive}, Total : {len(alive)}")
+    #     self.active_worker_ids = alive
+    #     logger.info(f"Alive workers: {alive}, Total : {len(alive)}")
 
-        return alive, dead
+    #     return alive, dead
+
 
 def create_worker_id_pool():
-    worker_ids = [f"worker-{i:03d}" for i in range(NUM_WORKERS)]
-    r.delete("available_worker_ids")
-    r.delete("active_worker_ids")
-    for i, wid in enumerate(worker_ids):
-        r.zadd("available_worker_ids", {wid: i})  # score = i
-    logger.info(f"Initialized {NUM_WORKERS} worker IDs in Redis.")
+    worker_ids = ["1", "2", "3", "4"]
+    # r.delete("available_worker_ids")
+    # r.delete("active_worker_ids")
+    # for i, wid in enumerate(worker_ids):
+    #     r.zadd("available_worker_ids", {wid: i})  # score = i
+    # logger.info(f"Initialized {NUM_WORKERS} worker IDs in Redis.")
     return worker_ids
 
-def monitor_workers(scheduler, CHECK_INTERVAL):
-    while True:
-        scheduler.check_alive_workers()
-        time.sleep(CHECK_INTERVAL)
+
+# def monitor_workers(scheduler, CHECK_INTERVAL):
+#     while True:
+#         scheduler.check_alive_workers()
+#         time.sleep(CHECK_INTERVAL)

@@ -5,11 +5,11 @@ import time
 import numpy as np
 import pandas as pd
 import glob
-import threading          
-import datetime           
+import threading
+import datetime
 import psutil
-from kafka_util import create_kafka_consumer,KafkaProducerSingleton
-from config import KAFKA_TRAIN_TOPIC,KAFKA_RESULTS_TOPIC,REDIS_ADDRESS
+from kafka_util import create_kafka_consumer, KafkaProducerSingleton
+from config import KAFKA_TRAIN_TOPIC, KAFKA_RESULTS_TOPIC, REDIS_ADDRESS
 from sklearn.base import BaseEstimator
 from sklearn.pipeline import Pipeline
 from logger_util import logger
@@ -21,8 +21,8 @@ from redis_util import create_redis_client
 
 r = create_redis_client()
 worker_id = None
-HEARTBEAT_INTERVAL = 5
-HEARTBEAT_TTL = HEARTBEAT_INTERVAL * 3
+# HEARTBEAT_INTERVAL = 5
+# HEARTBEAT_TTL = HEARTBEAT_INTERVAL * 3
 # Dictionary of supported model imports for dynamic loading
 MODEL_IMPORTS = {
     # Classifiers
@@ -47,34 +47,38 @@ MODEL_IMPORTS = {
     'Imputer': 'from sklearn.impute import SimpleImputer'
 }
 
-def claim_worker_id():
-    while True:
-        # Get the lowest score worker id
-        available = r.zrange("available_worker_ids", 0, 0)
-        if available:
-            worker_id = available[0].decode() if isinstance(available[0], bytes) else available[0]
-            key = f"worker_claims:{worker_id}"
-            if not r.exists(key):
-                # Claim it: remove from available, add to active, set heartbeat
-                r.zrem("available_worker_ids", worker_id)
-                r.sadd("active_worker_ids", worker_id)
-                r.set(key, "active", ex=HEARTBEAT_TTL)
-                logger.info(f"[{worker_id}] Successfully claimed!")
-                return worker_id
-            else:
-                logger.info(f"[{worker_id}] Already in use, trying again...")
-        else:
-            logger.info("No available worker IDs, retrying in 5s...")
-            time.sleep(5)
 
-def heartbeat(worker_id):
-    while True:
-        try:
-            r.set(f"worker_claims:{worker_id}", "active", ex=HEARTBEAT_TTL)
-            print(f"[{worker_id}] Heartbeat")
-        except Exception as e:
-            print(f"[{worker_id}] Heartbeat error: {e}")
-        time.sleep(HEARTBEAT_INTERVAL)
+# def claim_worker_id():
+#     while True:
+#         # Get the lowest score worker id
+#         available = r.zrange("available_worker_ids", 0, 0)
+#         if available:
+#             worker_id = available[0].decode() if isinstance(
+#                 available[0], bytes) else available[0]
+#             key = f"worker_claims:{worker_id}"
+#             if not r.exists(key):
+#                 # Claim it: remove from available, add to active, set heartbeat
+#                 r.zrem("available_worker_ids", worker_id)
+#                 r.sadd("active_worker_ids", worker_id)
+#                 r.set(key, "active", ex=HEARTBEAT_TTL)
+#                 logger.info(f"[{worker_id}] Successfully claimed!")
+#                 return worker_id
+#             else:
+#                 logger.info(f"[{worker_id}] Already in use, trying again...")
+#         else:
+#             logger.info("No available worker IDs, retrying in 5s...")
+#             time.sleep(5)
+
+
+# def heartbeat(worker_id):
+#     while True:
+#         try:
+#             r.set(f"worker_claims:{worker_id}", "active", ex=HEARTBEAT_TTL)
+#             print(f"[{worker_id}] Heartbeat")
+#         except Exception as e:
+#             print(f"[{worker_id}] Heartbeat error: {e}")
+#         time.sleep(HEARTBEAT_INTERVAL)
+
 
 def main():
     """
@@ -83,15 +87,19 @@ def main():
     """
     global worker_id
     # Initialize Redis connection
-    worker_id = claim_worker_id()
-    logger.info(f"Starting worker with ID : {worker_id}.....")
-    threading.Thread(target=heartbeat, args=(worker_id,), daemon=True).start()
+    # worker_id = claim_worker_id()
+    # logger.info(f"Starting worker with ID : {worker_id}.....")
+    # threading.Thread(target=heartbeat, args=(worker_id,), daemon=True).start()
+
+    worker_id = os.getenv("WORKER_ID", "unknown")
+    logger.info(f"Starting static worker with ID: {worker_id}")
     # Initialize Kafka consumer
-    consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC,group_id='train-group')
+    consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC, group_id='train-group')
     # Initialize Kafka producer for results
     producer = KafkaProducerSingleton.get_producer()
-    
-    metrics_producer = KafkaProducer(bootstrap_servers='kafka:9092',value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+
+    metrics_producer = KafkaProducer(
+        bootstrap_servers='kafka:9092', value_serializer=lambda v: json.dumps(v).encode('utf-8'))
     logger.info("ML Worker started. Waiting for tasks...")
     # Process messages
     for message in consumer:
@@ -105,39 +113,53 @@ def main():
             logger.info(task)
             # Update task status in Redis
             # update_task_status(task_id, "processing")
-            
+
             received_at = datetime.datetime.now(datetime.timezone.utc)
-            started_at  = datetime.datetime.now(datetime.timezone.utc)
-            
+            started_at = datetime.datetime.now(datetime.timezone.utc)
+
             cpu_samples = []
             mem_samples = []
             stop_flag = threading.Event()
+
             def sampler():
                 while not stop_flag.is_set():
                     cpu_samples.append(psutil.cpu_percent(interval=None))
                     mem_samples.append(psutil.virtual_memory().percent)
-                    time.sleep(0.5)  
-                    
+                    time.sleep(0.5)
+
             sampler_thread = threading.Thread(target=sampler)
             sampler_thread.start()
 
             # # Process the task based on its type
             result = process_task(task)
-            
+
             stop_flag.set()
             sampler_thread.join()
             finished_at = datetime.datetime.now(datetime.timezone.utc)
             cpu_avg = sum(cpu_samples)/len(cpu_samples)
             mem_avg = sum(mem_samples)/len(mem_samples)
-            
+
+            performance_metric = None
+            performance_metric_name = None
+
+            if 'accuracy' in result:
+                performance_metric = result['accuracy']
+                performance_metric_name = 'accuracy'
+            elif 'r2_score' in result:
+                performance_metric = result['r2_score']
+                performance_metric_name = 'r2_score'
+
             metrics = {
-                 "worker_id":       os.getenv("HOSTNAME","unknown"),
-                 "subtask_id":      task_id,
-                 "received_at":     received_at.isoformat()+"Z",
-                 "started_at":      started_at.isoformat()+"Z",
-                 "finished_at":     finished_at.isoformat()+"Z",
-                 "cpu_percent_avg": cpu_avg,
-                 "mem_percent_avg": mem_avg
+                "worker_id":       worker_id,
+                "subtask_id":      task_id,
+                "status":          "DONE",
+                "received_at":     received_at.isoformat()+"Z",
+                "started_at":      started_at.isoformat()+"Z",
+                "finished_at":     finished_at.isoformat()+"Z",
+                "cpu_percent_avg": cpu_avg,
+                "mem_percent_avg": mem_avg,
+                "metric_name":     performance_metric_name,
+                "metric_value":    performance_metric
             }
             metrics_producer.send('metrics', metrics)
             metrics_producer.flush()
@@ -183,6 +205,7 @@ def main():
             except:
                 logger.error("Failed to report error status")
 
+
 def train_model(task):
     # Extract task parameters
     algorithm_name = task.get('model_type')
@@ -196,7 +219,8 @@ def train_model(task):
     X, y = load_dataset(dataset_id, train_param)
 
     # Split into train/test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42)
 
     # Create model instance
     model = get_model_instance(algorithm_name, parameters)
@@ -255,6 +279,7 @@ def train_model(task):
 
     return results
 
+
 def process_task(task):
     """
     Process an ML training task.
@@ -292,9 +317,9 @@ def load_dataset(dataset_id, train_param):
     """
     # In a real implementation, this would fetch from a data store like S3, HDFS, etc.
     # For this example, we'll simulate loading from a file based on dataset_id
-    #dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"
+    # dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
-    
+
     data_dir = f"/mnt/efs/datasets/{dataset_id}"
     csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
     dataset_path = csv_paths[0]
@@ -349,7 +374,6 @@ def get_model_instance(algorithm_name, parameters):
 
 def check_model_type(model):
 
-
     if model is None:
         return "Model not found"
 
@@ -359,8 +383,6 @@ def check_model_type(model):
         return "regressor"
     else:
         return "Unknown model type"
-
-
 
 
 # def preprocess_data(redis_client, task):
@@ -404,9 +426,6 @@ def check_model_type(model):
 #     }
 #
 #     return results
-
-
-
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 import json
 import boto3
 from config import REGION
-from config import KAFKA_ADDRESS,KAFKA_TRAIN_TOPIC,KAFKA_RESULTS_TOPIC
+from config import KAFKA_ADDRESS, KAFKA_TRAIN_TOPIC, KAFKA_RESULTS_TOPIC, KAFKA_SCHEDULER_INGRESS_TOPIC
 from logger_util import logger
 
-from kafka import KafkaProducer,KafkaConsumer
+from kafka import KafkaProducer, KafkaConsumer
 import atexit
 
 
@@ -31,7 +31,14 @@ def send_to_kafka(subtasks, producer):
     for subtask in subtasks:
         try:
             # Send to a single topic for all tasks
-            producer.send(KAFKA_TRAIN_TOPIC, subtask)
+            if isinstance(subtask, str):
+                logger.warning("Received subtask as string; decoding JSON")
+                subtask = json.loads(subtask)
+
+            subtask_id = subtask.get('subtask_id', 'unknown')
+            logger.info(
+                f"Sending task {subtask_id} to Kafka topic '{KAFKA_SCHEDULER_INGRESS_TOPIC}'")
+            producer.send(KAFKA_SCHEDULER_INGRESS_TOPIC, subtask)
         except Exception as e:
             logger.error(f"Error sending task to Kafka: {str(e)}")
 
@@ -54,7 +61,7 @@ class KafkaSingleton:
         """Returns a singleton Kafka producer instance."""
         try:
             if KafkaSingleton._producer is None:
-            # kafka_address = get_kafka_address(REGION) # Un comment on AWS
+                # kafka_address = get_kafka_address(REGION) # Un comment on AWS
                 kafka_address = KAFKA_ADDRESS  # Comment on AWS
                 KafkaSingleton._producer = KafkaProducer(
 
@@ -76,7 +83,8 @@ class KafkaSingleton:
             KafkaSingleton._producer.close()
             KafkaSingleton._producer = None  # Mark as closed
 
-def get_consumer(topic,group_id=None):
+
+def get_consumer(topic, group_id=None):
     """Create and return a Kafka consumer for the task_results topic."""
     try:
         # kafka_address = get_kafka_address(REGION) # Un comment on AWS
@@ -84,7 +92,7 @@ def get_consumer(topic,group_id=None):
         consumer = KafkaConsumer(
             topic,
             bootstrap_servers=[kafka_address],
-            group_id=group_id,  
+            group_id=group_id,
             auto_offset_reset='earliest',
             value_deserializer=lambda x: json.loads(x.decode('utf-8'))
         )
@@ -94,7 +102,5 @@ def get_consumer(topic,group_id=None):
         logger.error(f"Error creating Kafka consumer: {e}")
         raise
 
+
 atexit.register(KafkaSingleton.close_producer)
-
-
-
