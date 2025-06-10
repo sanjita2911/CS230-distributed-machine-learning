@@ -44,7 +44,7 @@ import joblib
 import pandas as pd
 # from kafka_util import KafkaSingleton
 from kafka import KafkaProducer, KafkaConsumer
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from sklearn.ensemble import GradientBoostingRegressor
 from scheduler_service import Scheduler, create_worker_id_pool, WorkerState
@@ -68,15 +68,19 @@ WORKER_MEM_MB_DEFAULT = int(os.getenv("WORKER_MEM_MB", "16000"))
 app = FastAPI(title="Distributed‑ML Scheduler", version="2.0")
 _scheduler: Optional[Scheduler] = None
 
+
 class WorkerPatch(BaseModel):
     mem_capacity_mb: Optional[int] = None
+
 
 class WorkerRegistrationRequest(BaseModel):
     mem_capacity_mb: Optional[int] = WORKER_MEM_MB_DEFAULT
     host: Optional[str] = None
 
+
 class UnsubscribeRequest(BaseModel):
     worker_id: str
+
 
 @app.on_event("startup")
 async def _startup():
@@ -86,6 +90,7 @@ async def _startup():
     # threading.Thread(target=monitor_workers, args=(
     #     _scheduler, CHECK_INTERVAL), daemon=True).start()
     logger.info("Scheduler started with workers..... ")
+
 
 @app.get("/workers")
 async def workers():
@@ -111,6 +116,7 @@ async def subscribe_worker(req: WorkerRegistrationRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+
 @app.post("/unsubscribe")
 async def unsubscribe_worker(req: UnsubscribeRequest):
     wid = req.worker_id
@@ -118,9 +124,40 @@ async def unsubscribe_worker(req: UnsubscribeRequest):
     if wid not in _scheduler.workers:
         raise HTTPException(status_code=404, detail=f"Worker {wid} not found")
     # Remove worker from active state
+    # _scheduler.release_worker_id(wid)
+
+    worker_state = _scheduler.workers.pop(wid, None)
     _scheduler.release_worker_id(wid)
-    logger.info(f"Worker {wid} unsubscribed leaving pool. {wid} now free for assignment")
+
+    if worker_state:
+        for task in worker_state.tasks_queue:
+            logger.info(
+                f"♻️ Reassigning task {task.get('subtask_id')} from unsubscribed worker {wid}")
+            await _scheduler._requeue_task(task)
+    logger.info(
+        f"Worker {wid} unsubscribed leaving pool. {wid} now free for assignment")
     return {"status": "unsubscribed", "worker_id": wid}
+
+
+@app.post("/heartbeat")
+async def receive_heartbeat(req: Request):
+    data = await req.json()
+    wid = data.get("worker_id")
+    if not wid or wid not in _scheduler.workers:
+        raise HTTPException(status_code=404, detail="Unknown worker ID")
+
+    _scheduler.workers[wid].last_heartbeat = datetime.now(timezone.utc)
+    logger.info(f"✅ Received heartbeat from worker {wid}")
+    return {"status": "ok"}
+
+
+@app.get("/queues")
+async def task_queues():
+    return {
+        wid: [task.get("subtask_id") for task in w.tasks_queue]
+        for wid, w in _scheduler.workers.items()
+    }
+
 
 def _shutdown(*_):
     logger.info("Gracefully Shutting down scheduler ")

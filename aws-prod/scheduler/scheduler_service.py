@@ -24,8 +24,7 @@ logger.info("🔧 Logger initialized correctly in scheduler_service.py")
 
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
-NUM_WORKERS = 4
-BATCH_SIZE = 2
+BATCH_SIZE = 10
 
 r = create_redis_client()
 
@@ -98,7 +97,7 @@ class WorkerState(BaseModel):
     mem_capacity_mb: int = WORKER_MEM_MB_DEFAULT
     speed_factor: float = 1.0  # >1 means faster than baseline
     last_heartbeat: datetime = datetime.now(timezone.utc)
-    tasks_queue = []
+    tasks_queue: List[dict] = []
 
     def effective_finish_time(self) -> float:
         """Return load adjusted by speed."""
@@ -115,10 +114,7 @@ class Scheduler:
     def __init__(self):
         # if not worker_ids:
         #     raise ValueError("Need at least one worker")
-        self.max_workers = 100
-        self.all_worker_ids = list(range(1, self.max_workers + 1))
-        self.available_worker_ids = self.all_worker_ids.copy()
-        heapq.heapify(self.available_worker_ids)
+        self.next_worker_id = 1
         self.active_worker_ids = set()
         self.task_estimates = {}
         self.workers: dict[str, WorkerState] = {}
@@ -157,18 +153,17 @@ class Scheduler:
     # Worker selection
     # --------------------------------------------------------------
     def release_worker_id(self, wid: str):
-        if wid in self.active_worker_ids:
-            self.active_worker_ids.remove(wid)
-            heapq.heappush(self.available_worker_ids, int(wid))
-            self.workers.pop(wid, None)  # Remove from active worker map
+        self.workers.pop(wid, None)
+        logger.info(f"Released worker ID: {wid}")
 
     def assign_worker_id(self) -> str:
-        if not self.available_worker_ids:
-            raise RuntimeError("No free worker IDs available")
-        wid_num = heapq.heappop(self.available_worker_ids)
-        wid = str(wid_num)
-        self.active_worker_ids.add(wid)
-        self.workers[wid] = WorkerState(worker_id=wid)
+        wid = str(self.next_worker_id)
+        self.next_worker_id += 1
+
+        worker = WorkerState(worker_id=wid)
+        self.workers[wid] = worker
+
+        logger.info(f"Assigned new worker ID: {wid}")
         return wid
 
     def reassign_tasks(self, wid: WorkerState):
@@ -208,8 +203,53 @@ class Scheduler:
         loop = asyncio.get_running_loop()
         await asyncio.gather(
             loop.run_in_executor(None, self._ingress_loop),
-            loop.run_in_executor(None, self._status_loop)
+            loop.run_in_executor(None, self._status_loop),
+            self._heartbeat_monitor_loop()
         )
+
+    async def _heartbeat_monitor_loop(self):
+        logger.info("📡 Starting heartbeat monitor...")
+        while not self.shutdown_event.is_set():
+            await asyncio.sleep(15)
+            now = datetime.now(timezone.utc)
+            dead_workers = []
+
+            for wid, state in list(self.workers.items()):
+                delta = (now - state.last_heartbeat).total_seconds()
+                if delta > 10:
+                    logger.warning(
+                        f"💀 Worker {wid} missed heartbeat ({delta:.1f}s ago). Marking as dead.")
+                    dead_workers.append(wid)
+            for wid in dead_workers:
+                state = self.workers.pop(wid)
+                self.release_worker_id(wid)
+
+                for task in state.tasks_queue:
+                    logger.info(
+                        f"♻️ Reassigning task {task.get('subtask_id')} from dead worker {wid}")
+                    await self._requeue_task(task)
+
+    async def _requeue_task(self, task: dict):
+        try:
+            mem_mb = int(task.get("mem_mb", 1024))
+            est = self.predictor.predict(task)
+            subtask_id = task.get("subtask_id")
+            self.task_estimates[subtask_id] = est
+
+            worker, _ = self._select_worker(est, mem_mb)
+            worker.load_seconds += est
+            worker.mem_load_mb += mem_mb
+            worker.tasks_queue.append(task)
+
+            self.producer.send(
+                topic=KAFKA_TRAIN_TOPIC,
+                key=worker.worker_id,
+                value=json.dumps(task)
+            )
+            logger.info(
+                f"✅ Task {subtask_id} reassigned to worker {worker.worker_id}")
+        except Exception:
+            logger.exception("❌ Failed to reassign task")
 
     def _ingress_loop(self):
         logger.info("🔁 Starting _ingress_loop ...")
@@ -229,6 +269,7 @@ class Scheduler:
 
                         worker.load_seconds += est
                         worker.mem_load_mb += mem_mb
+                        worker.tasks_queue.append(task)
 
                         self.producer.send(
                             topic=KAFKA_TRAIN_TOPIC,
@@ -336,7 +377,7 @@ class Scheduler:
 
 
 def create_worker_id_pool():
-    worker_ids = [f"{i}" for i in range(1,101)]
+    worker_ids = [f"{i}" for i in range(1, 101)]
     # r.delete("available_worker_ids")
     # r.delete("active_worker_ids")
     # for i, wid in enumerate(worker_ids):
@@ -345,18 +386,20 @@ def create_worker_id_pool():
     logger.info(f'Created Worker IDs : {worker_ids}')
     return worker_ids
 
-def assign_worker_id(self) -> str:
-    if not self.available_worker_ids:
-        raise RuntimeError("No free worker IDs available")
 
-    new_id = self.available_worker_ids.pop()  # Get and remove from available
-    self.active_worker_ids.add(new_id)        # Mark as active
-    return new_id
+# def assign_worker_id(self) -> str:
+#     if not self.available_worker_ids:
+#         raise RuntimeError("No free worker IDs available")
 
-def release_worker_id(self, worker_id: str):
-    if worker_id in self.active_worker_ids:
-        self.active_worker_ids.remove(worker_id)
-        self.available_worker_ids.add(worker_id)
+#     new_id = self.available_worker_ids.pop()  # Get and remove from available
+#     self.active_worker_ids.add(new_id)        # Mark as active
+#     return new_id
+
+
+# def release_worker_id(self, worker_id: str):
+#     if worker_id in self.active_worker_ids:
+#         self.active_worker_ids.remove(worker_id)
+#         self.available_worker_ids.add(worker_id)
 
 # def monitor_workers(scheduler, CHECK_INTERVAL):
 #     while True:

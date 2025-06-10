@@ -1,0 +1,55 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scheduler
+  template:
+    metadata:
+      labels:
+        app: scheduler
+    spec:
+      containers:
+      - name: scheduler
+        image: nayaksv/scheduler:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: KAFKA_BOOTSTRAP
+          value: kafka:9092
+        - name: SCHED_INGRESS_TOPIC
+          value: tasks
+        - name: SCHED_EGRESS_TOPIC
+          value: train
+        - name: WORKER_STATUS_TOPIC
+          value: metrics
+        - name: WORKER_MEM_MB
+          value: "16000"
+        - name: ALGO_WEIGHT_JSON
+          value: '{"xgboost":1.3,"svm":1.1}'
+        - name: RUNTIME_MODEL_PATH
+          value: /mnt/efs/runtime_model.joblib
+        volumeMounts:
+        - name: shared-storage
+          mountPath: /mnt/efs
+      volumes:
+      - name: shared-storage
+        hostPath:
+          path: /mnt/efs
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler
+spec:
+  selector:
+    app: scheduler
+  ports:
+  - port: 8000
+    targetPort: 8000
+

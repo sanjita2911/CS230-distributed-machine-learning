@@ -1,0 +1,32 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 1  # KEDA will manage scaling later
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+      - name: worker
+        image: nayaksv/worker:latest
+        env:
+        - name: WORKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: shared-storage
+          mountPath: /mnt/efs
+      volumes:
+      - name: shared-storage
+        hostPath:
+          path: /mnt/efs
+          type: DirectoryOrCreate
+
