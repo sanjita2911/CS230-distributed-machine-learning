@@ -47,7 +47,7 @@ from kafka import KafkaProducer, KafkaConsumer
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.ensemble import GradientBoostingRegressor
-from scheduler_service import Scheduler, create_worker_id_pool
+from scheduler_service import Scheduler, create_worker_id_pool, WorkerState
 
 from redis_util import create_redis_client
 
@@ -68,31 +68,24 @@ WORKER_MEM_MB_DEFAULT = int(os.getenv("WORKER_MEM_MB", "16000"))
 app = FastAPI(title="Distributed‑ML Scheduler", version="2.0")
 _scheduler: Optional[Scheduler] = None
 
+class WorkerPatch(BaseModel):
+    mem_capacity_mb: Optional[int] = None
+
+class WorkerRegistrationRequest(BaseModel):
+    mem_capacity_mb: Optional[int] = WORKER_MEM_MB_DEFAULT
+    host: Optional[str] = None
+
+class UnsubscribeRequest(BaseModel):
+    worker_id: str
 
 @app.on_event("startup")
 async def _startup():
     global _scheduler
-   # _worker_ids = create_worker_id_pool()
     _scheduler = Scheduler()
     asyncio.create_task(_scheduler.run())
     # threading.Thread(target=monitor_workers, args=(
     #     _scheduler, CHECK_INTERVAL), daemon=True).start()
     logger.info("Scheduler started with workers..... ")
-
-
-class WorkerPatch(BaseModel):
-    mem_capacity_mb: Optional[int] = None
-
-
-@app.patch("/workers/{worker_id}")
-async def patch_worker(worker_id: str, patch: WorkerPatch):
-    if worker_id not in _scheduler.workers:  # type: ignore
-        raise HTTPException(404, "Worker not found")
-    w = _scheduler.workers[worker_id]  # type: ignore
-    if patch.mem_capacity_mb is not None:
-        w.mem_capacity_mb = patch.mem_capacity_mb
-    return w
-
 
 @app.get("/workers")
 async def workers():
@@ -104,12 +97,41 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/subscribe")
+async def subscribe_worker(req: WorkerRegistrationRequest):
+    try:
+        wid = _scheduler.assign_worker_id()
+        worker = WorkerState(
+            worker_id=wid,
+            mem_capacity_mb=req.mem_capacity_mb or WORKER_MEM_MB_DEFAULT,
+        )
+        _scheduler.workers[wid] = worker
+        logger.info(f"Worker {wid} registered at {req.host}")
+        return {"status": "registered", "worker_id": wid}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+@app.post("/unsubscribe")
+async def unsubscribe_worker(req: UnsubscribeRequest):
+    wid = req.worker_id
+
+    if wid not in _scheduler.workers:
+        raise HTTPException(status_code=404, detail=f"Worker {wid} not found")
+    # Remove worker from active state
+    _scheduler.release_worker_id(wid)
+    logger.info(f"Worker {wid} unsubscribed leaving pool. {wid} now free for assignment")
+    return {"status": "unsubscribed", "worker_id": wid}
+
 def _shutdown(*_):
-    logger.info("Shutting down scheduler")
+    logger.info("Gracefully Shutting down scheduler ")
     if _scheduler:
-        _scheduler.consumer.close()
-        _scheduler.status_consumer.close()
-        _scheduler.producer.flush()
+        _scheduler.shutdown_event.set()  # stop all loops
+        try:
+            _scheduler.consumer.close()
+            _scheduler.status_consumer.close()
+            _scheduler.producer.flush()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
     sys.exit(0)
 
 

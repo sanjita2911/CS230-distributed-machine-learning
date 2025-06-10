@@ -144,3 +144,22 @@ def update_subtask(session_id, job_id, subtask_id, status, result_data, redis_cl
 
     except Exception as e:
         return {"status": "error", "message": f"Error updating Redis: {str(e)}"}
+
+
+def save_session_metadata(session_id, metadata, redis_client):
+    """
+    Save session-level metadata like dataset stats to Redis.
+
+    Args:
+        session_id (str): Unique ID of the session
+        metadata (dict): Dictionary containing dataset metadata
+        redis_client (redis.Redis): Redis client
+    """
+    session_meta_key = f"active_sessions:{session_id}:metadata"
+    try:
+        redis_client.hset(session_meta_key, mapping=metadata)
+        logger.info(f"Session metadata saved for session {session_id}")
+        return {"status": "success", "message": "Metadata saved"}
+    except Exception as e:
+        logger.error(f"Error saving session metadata: {e}")
+        return {"status": "error", "message": str(e)}

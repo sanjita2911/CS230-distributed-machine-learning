@@ -1,6 +1,7 @@
 import json
 import os
 import pickle
+import sys
 import time
 import numpy as np
 import pandas as pd
@@ -9,7 +10,7 @@ import threading
 import datetime
 import psutil
 from kafka_util import create_kafka_consumer, KafkaProducerSingleton
-from config import KAFKA_TRAIN_TOPIC, KAFKA_RESULTS_TOPIC, REDIS_ADDRESS
+from config import KAFKA_TRAIN_TOPIC, KAFKA_RESULTS_TOPIC, REDIS_ADDRESS, SCHEDULER_ADDRESS
 from sklearn.base import BaseEstimator
 from sklearn.pipeline import Pipeline
 from logger_util import logger
@@ -18,6 +19,10 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, r2_score, mean_squared_error
 from kafka import KafkaProducer
 from redis_util import create_redis_client
+import requests
+import socket
+import atexit
+import signal
 
 r = create_redis_client()
 worker_id = None
@@ -81,7 +86,42 @@ MODEL_IMPORTS = {
 #         except Exception as e:
 #             print(f"[{worker_id}] Heartbeat error: {e}")
 #         time.sleep(HEARTBEAT_INTERVAL)
+def register_with_scheduler():
+    scheduler_url = os.getenv("SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/subscribe")
 
+    worker_info = {
+        "mem_capacity_mb": int(os.getenv("WORKER_MEM_MB", "8192")),
+        "host": socket.gethostbyname(socket.gethostname()),
+    }
+    try:
+        response = requests.post(scheduler_url, json=worker_info)
+        response.raise_for_status()
+        assigned_info = response.json()
+        logger.info("Registered with scheduler. Assigned ID:", assigned_info)
+        return assigned_info["worker_id"]
+    except Exception as e:
+        print("Failed to register worker:", e)
+        return None
+
+def unsubscribe_from_scheduler():
+    global worker_id
+    scheduler_url = os.getenv("SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/unsubscribe")
+
+    try:
+        response = requests.post(scheduler_url, json={"worker_id": worker_id})
+        response.raise_for_status()
+        logger.info(f"Successfully unsubscribed worker {worker_id}")
+    except Exception as e:
+        logger.warning(f"Failed to unsubscribe worker {worker_id}:", e)
+
+
+# atexit.register(unsubscribe_from_scheduler)
+def handle_signal(signum, frame):
+    unsubscribe_from_scheduler()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_signal)   # Ctrl+C
+signal.signal(signal.SIGTERM, handle_signal)  # Docker stop or system kill
 
 def main():
     """
@@ -94,19 +134,21 @@ def main():
     # logger.info(f"Starting worker with ID : {worker_id}.....")
     # threading.Thread(target=heartbeat, args=(worker_id,), daemon=True).start()
 
-    worker_id = os.getenv("WORKER_ID", "unknown")
-    logger.info(f"Starting static worker with ID: {worker_id}")
+    # worker_id = os.getenv("WORKER_ID", "unknown")
+    worker_id = register_with_scheduler()
+    logger.info(f"Starting worker with ID: {worker_id}")
     # Initialize Kafka consumer
     consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC, group_id='train-group')
     # Initialize Kafka producer for results
     producer = KafkaProducerSingleton.get_producer()
-
-    metrics_producer = KafkaProducer(
-        bootstrap_servers='kafka:9092', value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+    # metrics_producer = KafkaProducer(
+    #     bootstrap_servers='kafka:9092', value_serializer=lambda v: json.dumps(v).encode('utf-8'))
     logger.info("ML Worker started. Waiting for tasks...")
     # Process messages
     for message in consumer:
         try:
+            if message.key.decode() != worker_id:
+                continue
             # Extract task data
             task = message.value
             task_id = task.get('subtask_id')
@@ -164,8 +206,8 @@ def main():
                 "metric_name":     performance_metric_name,
                 "metric_value":    performance_metric
             }
-            metrics_producer.send('metrics', metrics)
-            metrics_producer.flush()
+            producer.send('metrics', metrics)
+            producer.flush()
             # Send results to Kafka
             result_message = {
                 'subtask_id': task_id,
@@ -432,4 +474,5 @@ def check_model_type(model):
 
 
 if __name__ == "__main__":
+
     main()

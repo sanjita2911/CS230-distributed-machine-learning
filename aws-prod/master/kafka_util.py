@@ -1,7 +1,7 @@
 import json
 import boto3
 from config import REGION
-from config import KAFKA_ADDRESS, KAFKA_TRAIN_TOPIC, KAFKA_RESULTS_TOPIC, KAFKA_SCHEDULER_INGRESS_TOPIC
+from config import KAFKA_ADDRESS, KAFKA_TRAIN_TOPIC, KAFKA_RESULTS_TOPIC, KAFKA_SCHEDULER_TASKS_TOPIC
 from logger_util import logger
 
 from kafka import KafkaProducer, KafkaConsumer
@@ -37,8 +37,8 @@ def send_to_kafka(subtasks, producer):
 
             subtask_id = subtask.get('subtask_id', 'unknown')
             logger.info(
-                f"Sending task {subtask_id} to Kafka topic '{KAFKA_SCHEDULER_INGRESS_TOPIC}'")
-            producer.send(KAFKA_SCHEDULER_INGRESS_TOPIC, subtask)
+                f"Sending task {subtask_id} to Kafka topic '{KAFKA_SCHEDULER_TASKS_TOPIC}'")
+            producer.send(KAFKA_SCHEDULER_TASKS_TOPIC, subtask)
         except Exception as e:
             logger.error(f"Error sending task to Kafka: {str(e)}")
 

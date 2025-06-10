@@ -7,6 +7,7 @@ from pyspark.sql import SparkSession
 import boto3
 import yaml
 import io
+import csv
 import shutil
 from pyspark.sql import functions as F
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler, StandardScaler, MinMaxScaler
@@ -157,3 +158,25 @@ def preprocess_data(df, config):
         df = model.transform(df)
 
     return df
+
+
+def collect_csv_metadata(file_path):
+    file_size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 2)
+
+    with open(file_path, 'r', newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        column_names = header
+        column_count = len(header)
+
+        # Count remaining rows efficiently
+        row_count = sum(1 for _ in reader)
+
+    metadata = {
+        "rows": row_count,
+        "columns": column_count,
+        "size_mb": file_size_mb,
+        "column_names": ",".join(column_names),
+    }
+
+    return metadata

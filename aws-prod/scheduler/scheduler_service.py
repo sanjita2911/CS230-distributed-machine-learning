@@ -1,4 +1,6 @@
-from config import KAFKA_METRICS_TOPIC, KAFKA_SCHEDULER_INGRESS_TOPIC, KAFKA_TRAIN_TOPIC
+import heapq
+from threading import Event
+from config import KAFKA_METRICS_TOPIC, KAFKA_SCHEDULER_TASKS_TOPIC, KAFKA_TRAIN_TOPIC
 from redis_util import create_redis_client
 from sklearn.ensemble import GradientBoostingRegressor
 from pydantic import BaseModel
@@ -28,11 +30,7 @@ BATCH_SIZE = 2
 r = create_redis_client()
 
 BROKERS = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
-INGRESS_TOPIC = KAFKA_SCHEDULER_INGRESS_TOPIC
-EGRESS_TOPIC = KAFKA_TRAIN_TOPIC
-STATUS_TOPIC = KAFKA_METRICS_TOPIC
 MODEL_PATH = Path(os.getenv("RUNTIME_MODEL_PATH", "runtime_model.joblib"))
-
 WORKER_MEM_MB_DEFAULT = int(os.getenv("WORKER_MEM_MB", "16000"))
 
 # Algorithm‑weight mapping – e.g. {"xgboost":1.3,"randomforest":1.0}
@@ -99,7 +97,8 @@ class WorkerState(BaseModel):
     mem_load_mb: int = 0  # queued memory usage
     mem_capacity_mb: int = WORKER_MEM_MB_DEFAULT
     speed_factor: float = 1.0  # >1 means faster than baseline
-    # last_heartbeat: datetime = datetime.now(timezone.utc)
+    last_heartbeat: datetime = datetime.now(timezone.utc)
+    tasks_queue = []
 
     def effective_finish_time(self) -> float:
         """Return load adjusted by speed."""
@@ -116,19 +115,19 @@ class Scheduler:
     def __init__(self):
         # if not worker_ids:
         #     raise ValueError("Need at least one worker")
-        self.active_worker_ids = create_worker_id_pool()
+        self.max_workers = 100
+        self.all_worker_ids = list(range(1, self.max_workers + 1))
+        self.available_worker_ids = self.all_worker_ids.copy()
+        heapq.heapify(self.available_worker_ids)
+        self.active_worker_ids = set()
         self.task_estimates = {}
-        self.worker_id_map = {
-            wid: idx for idx, wid in enumerate(self.active_worker_ids)
-        }
-        self.workers = {
-            wid: WorkerState(worker_id=wid) for wid in self.active_worker_ids
-        }
+        self.workers: dict[str, WorkerState] = {}
         self.predictor = RuntimePredictor()
+        self.shutdown_event = Event()
 
-        # Consumer for ingress topic
+        # Consumer for TASKS topic
         self.consumer = KafkaConsumer(
-            INGRESS_TOPIC,
+            KAFKA_SCHEDULER_TASKS_TOPIC,
             bootstrap_servers=[BROKERS],
             group_id="scheduler-group",
             auto_offset_reset="earliest",
@@ -138,7 +137,7 @@ class Scheduler:
 
         # Consumer for status topic
         self.status_consumer = KafkaConsumer(
-            STATUS_TOPIC,
+            KAFKA_METRICS_TOPIC,
             bootstrap_servers=[BROKERS],
             group_id="scheduler-status-group",
             auto_offset_reset="earliest",
@@ -157,6 +156,23 @@ class Scheduler:
     # --------------------------------------------------------------
     # Worker selection
     # --------------------------------------------------------------
+    def release_worker_id(self, wid: str):
+        if wid in self.active_worker_ids:
+            self.active_worker_ids.remove(wid)
+            heapq.heappush(self.available_worker_ids, int(wid))
+            self.workers.pop(wid, None)  # Remove from active worker map
+
+    def assign_worker_id(self) -> str:
+        if not self.available_worker_ids:
+            raise RuntimeError("No free worker IDs available")
+        wid_num = heapq.heappop(self.available_worker_ids)
+        wid = str(wid_num)
+        self.active_worker_ids.add(wid)
+        self.workers[wid] = WorkerState(worker_id=wid)
+        return wid
+
+    def reassign_tasks(self, wid: WorkerState):
+        return None
 
     def _eligible_workers(self, mem_mb: int) -> List[WorkerState]:
         return [
@@ -197,7 +213,7 @@ class Scheduler:
 
     def _ingress_loop(self):
         logger.info("🔁 Starting _ingress_loop ...")
-        while True:
+        while not self.shutdown_event.is_set():
             records = self.consumer.poll()
             if records:
                 logger.info("Received Kafka messages: %s", records)
@@ -215,7 +231,7 @@ class Scheduler:
                         worker.mem_load_mb += mem_mb
 
                         self.producer.send(
-                            topic=EGRESS_TOPIC,
+                            topic=KAFKA_TRAIN_TOPIC,
                             key=worker.worker_id,
                             value=json.dumps(task),
                             headers=msg.headers
@@ -237,12 +253,12 @@ class Scheduler:
                             )
                         logger.info("Selected Worker: %s", worker.worker_id)
                         logger.info(
-                            "Task sent to topic '%s' with key '%s'", EGRESS_TOPIC, worker.worker_id)
+                            "Task sent to topic '%s' with key '%s'", KAFKA_TRAIN_TOPIC, worker.worker_id)
                     except Exception:
                         logger.exception("Failed to schedule task")
 
     def _status_loop(self):
-        while True:
+        while not self.shutdown_event.is_set():
             try:
                 records = self.status_consumer.poll()
                 if not records:
@@ -320,14 +336,27 @@ class Scheduler:
 
 
 def create_worker_id_pool():
-    worker_ids = ["1", "2", "3", "4"]
+    worker_ids = [f"{i}" for i in range(1,101)]
     # r.delete("available_worker_ids")
     # r.delete("active_worker_ids")
     # for i, wid in enumerate(worker_ids):
     #     r.zadd("available_worker_ids", {wid: i})  # score = i
     # logger.info(f"Initialized {NUM_WORKERS} worker IDs in Redis.")
+    logger.info(f'Created Worker IDs : {worker_ids}')
     return worker_ids
 
+def assign_worker_id(self) -> str:
+    if not self.available_worker_ids:
+        raise RuntimeError("No free worker IDs available")
+
+    new_id = self.available_worker_ids.pop()  # Get and remove from available
+    self.active_worker_ids.add(new_id)        # Mark as active
+    return new_id
+
+def release_worker_id(self, worker_id: str):
+    if worker_id in self.active_worker_ids:
+        self.active_worker_ids.remove(worker_id)
+        self.available_worker_ids.add(worker_id)
 
 # def monitor_workers(scheduler, CHECK_INTERVAL):
 #     while True:
