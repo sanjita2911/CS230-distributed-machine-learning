@@ -23,6 +23,7 @@ import requests
 import socket
 import atexit
 import signal
+import random
 
 r = create_redis_client()
 worker_id = None
@@ -87,25 +88,34 @@ MODEL_IMPORTS = {
 #             print(f"[{worker_id}] Heartbeat error: {e}")
 #         time.sleep(HEARTBEAT_INTERVAL)
 def register_with_scheduler():
-    scheduler_url = os.getenv("SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/subscribe")
+    scheduler_url = os.getenv(
+        "SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/subscribe")
 
     worker_info = {
         "mem_capacity_mb": int(os.getenv("WORKER_MEM_MB", "8192")),
         "host": socket.gethostbyname(socket.gethostname()),
     }
-    try:
-        response = requests.post(scheduler_url, json=worker_info)
-        response.raise_for_status()
-        assigned_info = response.json()
-        logger.info("Registered with scheduler. Assigned ID:", assigned_info)
-        return assigned_info["worker_id"]
-    except Exception as e:
-        print("Failed to register worker:", e)
-        return None
+    for _ in range(10):
+        try:
+            response = requests.post(
+                scheduler_url, json=worker_info, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            logger.info(
+                f"✅ Registered with scheduler. Worker ID: {data['worker_id']}")
+            return data["worker_id"]
+        except Exception as e:
+            logger.warning("⏳ Scheduler not ready yet, retrying in 5s...")
+            time.sleep(5)
+    logger.error(
+        "❌ Failed to register with scheduler after multiple attempts.")
+    return None
+
 
 def unsubscribe_from_scheduler():
     global worker_id
-    scheduler_url = os.getenv("SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/unsubscribe")
+    scheduler_url = os.getenv(
+        "SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/unsubscribe")
 
     try:
         response = requests.post(scheduler_url, json={"worker_id": worker_id})
@@ -115,13 +125,33 @@ def unsubscribe_from_scheduler():
         logger.warning(f"Failed to unsubscribe worker {worker_id}:", e)
 
 
+def send_heartbeat(worker_id):
+    scheduler_url = os.getenv(
+        "SCHEDULER_URL", f"{SCHEDULER_ADDRESS}/heartbeat")
+    while True:
+        try:
+            response = requests.post(scheduler_url, json={
+                "worker_id": worker_id
+            })
+            if response.status_code == 200:
+                logger.info(f"[{worker_id}] ❤️ Heartbeat sent")
+            else:
+                logger.warning(
+                    f"[{worker_id}] ❌ Heartbeat failed: {response.text}")
+        except Exception as e:
+            logger.error(f"[{worker_id}] ❌ Heartbeat error: {e}")
+        time.sleep(HEARTBEAT_INTERVAL)
+
+
 # atexit.register(unsubscribe_from_scheduler)
 def handle_signal(signum, frame):
     unsubscribe_from_scheduler()
     sys.exit(0)
 
+
 signal.signal(signal.SIGINT, handle_signal)   # Ctrl+C
 signal.signal(signal.SIGTERM, handle_signal)  # Docker stop or system kill
+
 
 def main():
     """
@@ -137,6 +167,11 @@ def main():
     # worker_id = os.getenv("WORKER_ID", "unknown")
     worker_id = register_with_scheduler()
     logger.info(f"Starting worker with ID: {worker_id}")
+    # Thread to send heartbeat
+    heartbeat_thread = threading.Thread(
+        target=send_heartbeat, args=(worker_id,), daemon=True)
+    heartbeat_thread.start()
+
     # Initialize Kafka consumer
     consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC, group_id='train-group')
     # Initialize Kafka producer for results
@@ -270,7 +305,10 @@ def train_model(task):
     # Create model instance
     model = get_model_instance(algorithm_name, parameters)
     algorithm_type = check_model_type(model)
-
+    delay = random.randint(30, 45)
+    logger.info(
+        f"[{worker_id}] ⏳ Simulating training lag of {delay} seconds before fitting model")
+    time.sleep(delay)
     # Train the model
     logger.info(f'Training Started for {algorithm_type}')
     start_time = time.time()

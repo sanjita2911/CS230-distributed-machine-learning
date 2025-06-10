@@ -140,7 +140,7 @@ services:
       - scheduler
       - redis
     environment:
-      - WORKER_ID=1
+      - SCHEDULER_ADDRESS=http://scheduler:8000
     networks:
       - mlnet
 
@@ -157,7 +157,7 @@ services:
       - scheduler
       - redis
     environment:
-      - WORKER_ID=2
+      - SCHEDULER_ADDRESS=http://scheduler:8000
     networks:
       - mlnet
 
@@ -174,7 +174,7 @@ services:
       - scheduler
       - redis
     environment:
-      - WORKER_ID=3
+      - SCHEDULER_ADDRESS=http://scheduler:8000
     networks:
       - mlnet
 
@@ -191,7 +191,7 @@ services:
       - scheduler
       - redis
     environment:
-      - WORKER_ID=4
+      - SCHEDULER_ADDRESS=http://scheduler:8000
     networks:
       - mlnet
 
