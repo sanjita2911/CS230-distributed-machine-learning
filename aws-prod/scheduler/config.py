@@ -5,6 +5,7 @@
 # REDIS_ADDRESS = '172.31.11.144'
 # KAFKA_TRAIN_TOPIC = 'train'
 # KAFKA_RESULTS_TOPIC = 'result'
+# MODEL_PATH
 
 # Local Docker Configuration
 

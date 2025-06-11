@@ -4,6 +4,7 @@ import boto3
 from config import REGION,REDIS_ADDRESS
 from datetime import datetime
 import json
+from dataset_util import collect_csv_metadata
 
 def create_redis_client():
     """Create and return a Redis client."""
@@ -35,7 +36,6 @@ def save_subtasks_to_redis(subtasks, redis_client):
 
     try:
         # Connect to Redis
-
         # Get session_id and job_id from the first subtask
         session_id = subtasks[0]['session_id']
         job_id = subtasks[0]['job_id']
@@ -57,6 +57,9 @@ def save_subtasks_to_redis(subtasks, redis_client):
         for subtask in subtasks:
             subtask_id = subtask['subtask_id']
             subtask_key = f"{job_key}:subtasks:{subtask_id}"
+            subtask_map_key = f"subtask_to_metadata:{subtask_id}"
+            metadata_key = f"active_sessions:{session_id}:jobs:{job_id}:metadata"
+            redis_client.set(subtask_map_key, metadata_key)
 
             # Convert subtask to JSON
             subtask_json = json.dumps(subtask, default=str)
@@ -146,20 +149,21 @@ def update_subtask(session_id, job_id, subtask_id, status, result_data, redis_cl
         return {"status": "error", "message": f"Error updating Redis: {str(e)}"}
 
 
-def save_session_metadata(session_id, metadata, redis_client):
+def save_job_metadata(session_id, job_id, metadata, redis_client):
     """
-    Save session-level metadata like dataset stats to Redis.
+    Save job-level metadata like dataset stats to Redis.
 
     Args:
         session_id (str): Unique ID of the session
+        job_id (str): Unique ID of the job
         metadata (dict): Dictionary containing dataset metadata
         redis_client (redis.Redis): Redis client
     """
-    session_meta_key = f"active_sessions:{session_id}:metadata"
+    job_meta_key = f"active_sessions:{session_id}:jobs:{job_id}:metadata"
     try:
-        redis_client.hset(session_meta_key, mapping=metadata)
-        logger.info(f"Session metadata saved for session {session_id}")
-        return {"status": "success", "message": "Metadata saved"}
+        redis_client.hset(job_meta_key, mapping=metadata)
+        logger.info(f"Job metadata saved for session {session_id}, job {job_id}")
+        return {"status": "success", "message": "Job metadata saved"}
     except Exception as e:
-        logger.error(f"Error saving session metadata: {e}")
+        logger.error(f"Error saving job metadata: {e}")
         return {"status": "error", "message": str(e)}

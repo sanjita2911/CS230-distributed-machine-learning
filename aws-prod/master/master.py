@@ -1,17 +1,16 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response, stream_with_context
 from flask_cors import CORS  # Import CORS
 import time
 import random
 import os
 import threading
-from flask import Flask, request, jsonify
 import glob
 import json
 import uuid
 from config import DATASET_PATH, KAFKA_ADDRESS
-from dataset_util import download_dataset, preprocess_data
+from dataset_util import download_dataset, preprocess_data, collect_csv_metadata
 from logger_util import logger
-from redis_util import create_redis_client, save_subtasks_to_redis, update_subtask
+from redis_util import create_redis_client, save_subtasks_to_redis, update_subtask, save_job_metadata
 from task_handler import create_subtasks, start_result_collector, consume_results
 from kafka_util import KafkaSingleton, send_to_kafka, get_consumer
 from kafka import TopicPartition
@@ -189,6 +188,8 @@ def train(session_id):
     subtasks = create_subtasks(model_config)
     subtask_list = [task['subtask_id'] for task in subtasks]
     logger.info(subtasks)
+    metadata = collect_csv_metadata(dataset_path)
+    save_job_metadata(session_id, subtasks[0]['job_id'], metadata, redis_client)
     redis_status = save_subtasks_to_redis(subtasks, redis_client)
     logger.info(redis_status)
     send_to_kafka(subtasks, producer)
@@ -200,6 +201,67 @@ def train(session_id):
 
     return jsonify({"status": "Model Training Started . . . ."})
 
+
+@app.route('/train_status/<session_id>', methods=['POST'])
+def train_status(session_id):
+    producer = KafkaSingleton.get_producer()
+
+    if not redis_client.sismember("active_sessions", session_id):
+        return jsonify({"error": "Invalid session ID"}), 404
+
+    model_config = request.get_json()
+    dataset_id = model_config.get('dataset_id')
+    data_dir = f"/mnt/efs/datasets/{dataset_id}"
+    csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
+    dataset_path = csv_paths[0] if csv_paths else None
+
+    if not dataset_path or not os.path.exists(dataset_path):
+        return jsonify({'error': f'Dataset {dataset_id} not found'}), 404
+
+    subtasks = create_subtasks(model_config)
+    subtask_ids = [task['subtask_id'] for task in subtasks]
+    redis_status = save_subtasks_to_redis(subtasks, redis_client)
+    send_to_kafka(subtasks, producer)
+
+    # Start consumer thread (optional, if background needed)
+    listener_thread = threading.Thread(
+        target=consume_results, args=(subtask_ids, session_id), daemon=True)
+    listener_thread.start()
+    logger.info("Result collector thread started here...")
+
+    # Stream progress + result
+    def event_stream():
+        job_id = subtasks[0]['job_id']
+        job_key = f"active_sessions:{session_id}:jobs:{job_id}"
+        result_key = f"{job_key}:result"
+
+        while True:
+            job_status = redis_client.hget(job_key, "status")
+            pending_tasks = int(redis_client.get(f"session:{session_id}:tasks_pending") or 0)
+            subtask_keys = redis_client.keys(f"{job_key}:subtasks:{job_id}-subtask-*")
+            total_subtasks = len(subtask_keys)
+
+            data = {
+                "session_id": session_id,
+                "job_id": job_id,
+                "job_status": job_status.decode() if job_status else "unknown",
+                "tasks_pending": pending_tasks,
+                "total_subtasks": total_subtasks,
+            }
+
+            # If complete, send final result
+            if job_status == "completed":
+                result = redis_client.get(result_key)
+                if result:
+                    data["job_result"] = json.loads(result)
+                yield f"data: {json.dumps(data)}\n\n"
+                break
+
+            # Send status update
+            yield f"data: {json.dumps(data)}\n\n"
+            time.sleep(1.5)
+
+    return Response(stream_with_context(event_stream()), mimetype='text/event-stream')
 
 @app.route('/download_model/<session_id>/<job_id>', methods=['POST'])
 def download_best_model(session_id, job_id):

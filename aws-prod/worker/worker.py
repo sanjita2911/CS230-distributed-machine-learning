@@ -173,7 +173,7 @@ def main():
     heartbeat_thread.start()
 
     # Initialize Kafka consumer
-    consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC, group_id='train-group')
+    consumer = create_kafka_consumer(KAFKA_TRAIN_TOPIC, group_id=f'group-{worker_id}')
     # Initialize Kafka producer for results
     producer = KafkaProducerSingleton.get_producer()
     # metrics_producer = KafkaProducer(
@@ -188,6 +188,7 @@ def main():
             task = message.value
             task_id = task.get('subtask_id')
             job_id = task.get('job_id')
+            algorithm_name = task.get('model_type')
 
             logger.info(f"Received task: {task_id}")
             logger.info(task)
@@ -219,15 +220,15 @@ def main():
             cpu_avg = sum(cpu_samples)/len(cpu_samples)
             mem_avg = sum(mem_samples)/len(mem_samples)
 
-            performance_metric = None
-            performance_metric_name = None
-
-            if 'accuracy' in result:
-                performance_metric = result['accuracy']
-                performance_metric_name = 'accuracy'
-            elif 'r2_score' in result:
-                performance_metric = result['r2_score']
-                performance_metric_name = 'r2_score'
+            # performance_metric = None
+            # performance_metric_name = None
+            #
+            # if 'accuracy' in result:
+            #     performance_metric = result['accuracy']
+            #     performance_metric_name = 'accuracy'
+            # elif 'r2_score' in result:
+            #     performance_metric = result['r2_score']
+            #     performance_metric_name = 'r2_score'
 
             metrics = {
                 "worker_id":       worker_id,
@@ -238,8 +239,7 @@ def main():
                 "finished_at":     finished_at.isoformat()+"Z",
                 "cpu_percent_avg": cpu_avg,
                 "mem_percent_avg": mem_avg,
-                "metric_name":     performance_metric_name,
-                "metric_value":    performance_metric
+                "algo": algorithm_name
             }
             producer.send('metrics', metrics)
             producer.flush()
@@ -305,10 +305,10 @@ def train_model(task):
     # Create model instance
     model = get_model_instance(algorithm_name, parameters)
     algorithm_type = check_model_type(model)
-    delay = random.randint(30, 45)
-    logger.info(
-        f"[{worker_id}] ⏳ Simulating training lag of {delay} seconds before fitting model")
-    time.sleep(delay)
+    # delay = random.randint(30, 45)
+    # logger.info(
+    #     f"[{worker_id}] ⏳ Simulating training lag of {delay} seconds before fitting model")
+    # time.sleep(delay)
     # Train the model
     logger.info(f'Training Started for {algorithm_type}')
     start_time = time.time()

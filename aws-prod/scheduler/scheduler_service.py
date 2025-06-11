@@ -1,7 +1,7 @@
 import heapq
 from threading import Event
 from config import KAFKA_METRICS_TOPIC, KAFKA_SCHEDULER_TASKS_TOPIC, KAFKA_TRAIN_TOPIC
-from redis_util import create_redis_client
+from redis_util import create_redis_client, get_metadata
 from sklearn.ensemble import GradientBoostingRegressor
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
@@ -19,11 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 from logger_util import logger
-logger.info("🔧 Logger initialized correctly in scheduler_service.py")
+logger.info("🔧 Logger initialized for Scheduler Service")
 # from kafka_util import KafkaSingleton
 
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
 BATCH_SIZE = 10
 
 r = create_redis_client()
@@ -49,7 +47,7 @@ class RuntimePredictor:
         else:
             self._model = GradientBoostingRegressor(
                 n_estimators=1, max_depth=1)
-            self._model.fit([[0, 0, 0, 0, 0, 0, 0, 0]], [60])  # dummy fit
+            self._model.fit([[0, 0, 0, 0, 0, 0, 0]], [60])  # dummy fit
             logger.warning("Runtime model cold‑started with default weights")
         self._buffer: List[Dict] = []
 
@@ -58,11 +56,11 @@ class RuntimePredictor:
             hash(task.get("algo", "")) % 1000,  # algo hash
             task.get("n_rows", 0),  # rows
             task.get("n_cols", 0),  # cols
-            task.get("hp_grid_size", 1),  # trials
-            task.get("mem_mb", 1024),  # memory MB
-            task.get("cpu_avg", 1.5),
-            hash(task.get("metric_name", "")) % 1000,
-            task.get("metric_value", 0)
+            task.get("mem_percent_avg", 1024),  # memory MB
+            task.get("cpu_percent_avg", 1.5),
+            # hash(task.get("metric_name", "")) % 1000,
+            task.get("metric_value", 0),
+            task.get("size_mb",0)
         ]
 
     def predict(self, task: dict) -> float:
@@ -166,9 +164,6 @@ class Scheduler:
         logger.info(f"Assigned new worker ID: {wid}")
         return wid
 
-    def reassign_tasks(self, wid: WorkerState):
-        return None
-
     def _eligible_workers(self, mem_mb: int) -> List[WorkerState]:
         return [
             w for w in self.workers.values()
@@ -270,7 +265,6 @@ class Scheduler:
                         worker.load_seconds += est
                         worker.mem_load_mb += mem_mb
                         worker.tasks_queue.append(task)
-
                         self.producer.send(
                             topic=KAFKA_TRAIN_TOPIC,
                             key=worker.worker_id,
@@ -326,12 +320,15 @@ class Scheduler:
 
                             w = self.workers[wid]
                             subtask_id = status.get("subtask_id")
+                            metadata = get_metadata(subtask_id, r)
+                            status.update(metadata)
                             est_runtime = self.task_estimates.get(
                                 subtask_id, runtime)
                             w.load_seconds = max(
                                 0.0, w.load_seconds - runtime)
 
                             w.mem_load_mb = max(0, w.mem_load_mb - mem_mb)
+                            w.tasks_queue = [task for task in w.tasks_queue if task.get("subtask_id") != subtask_id]
                             # w.last_heartbeat = datetime.now(timezone.utc)
                             # subtask_id = status.get("subtask_id")
                             # est_runtime = self.task_estimates.get(

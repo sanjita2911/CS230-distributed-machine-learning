@@ -173,10 +173,9 @@ def collect_csv_metadata(file_path):
         row_count = sum(1 for _ in reader)
 
     metadata = {
-        "rows": row_count,
-        "columns": column_count,
+        "n_rows": row_count,
+        "n_cols": column_count,
         "size_mb": file_size_mb,
-        "column_names": ",".join(column_names),
     }
 
     return metadata
