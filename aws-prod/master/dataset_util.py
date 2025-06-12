@@ -7,6 +7,7 @@ import io
 import csv
 import shutil
 import pandas as pd
+from sklearn.preprocessing import LabelEncoder
 
 
 def download_dataset(url, source_type, save_path, s3_bucket=None, s3_prefix=None):
@@ -38,8 +39,6 @@ def download_dataset(url, source_type, save_path, s3_bucket=None, s3_prefix=None
     except Exception as e:
         return False, str(e)
     
-
-
 
 def preprocess_data(dataset_path, config):
     df = pd.read_csv(dataset_path)
@@ -84,8 +83,19 @@ def preprocess_data(dataset_path, config):
         df = df.drop_duplicates()
 
     # 6. One-hot encode categorical features
-    categorical = config.get("categorical", [])
-    df = pd.get_dummies(df, columns=categorical, drop_first=False)
+    categorical = config.get("categorical", {})
+    for col, method in categorical.items():
+        if col in df.columns:
+            if method == "onehot":
+                dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
+                df = df.drop(columns=[col])
+                df = pd.concat([df, dummies], axis=1)
+            elif method == "label":
+                le = LabelEncoder()
+                df[col] = le.fit_transform(df[col].astype(str))
+            elif method == "freq":
+                freq_map = df[col].value_counts(normalize=True)
+                df[col] = df[col].map(freq_map)
 
     # 7. Scale numerical features
     scale = config.get("scale", {})

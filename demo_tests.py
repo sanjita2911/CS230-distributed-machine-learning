@@ -9,9 +9,8 @@ task_manager = MLTaskManager("http://127.0.0.1:5001")
 
 
 # download & check data
-# download_status = task_manager.download_data("/Users/aunguyen/Downloads/Titanic-Dataset.csv", "titanic", "local")
-# print()
-# print(download_status['message'], '\n')
+download_status = task_manager.download_data("yasserh/titanic-dataset", "titanic", "kaggle")
+print(download_status['message'], '\n')
 
 data_status = task_manager.check_data("titanic")
 print(data_status['status'], '\n')

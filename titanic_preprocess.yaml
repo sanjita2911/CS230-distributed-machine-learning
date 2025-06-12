@@ -17,9 +17,9 @@ drop_columns:
 drop_duplicates: true
 
 categorical:
-  - Sex
-  - Embarked
-  - Pclass
+  - Sex: onehot
+  - Embarked: onehot
+  - Pclass: onehot
 
 scale:
   method: standard
