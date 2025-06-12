@@ -54,13 +54,13 @@ class RuntimePredictor:
     def _features(self, task: dict):
         return [
             hash(task.get("algo", "")) % 1000,  # algo hash
-            task.get("n_rows", 0),  # rows
-            task.get("n_cols", 0),  # cols
+            int(task.get("n_rows", 0)),  # rows
+            int(task.get("n_cols", 0)),  # cols
             task.get("mem_percent_avg", 1024),  # memory MB
             task.get("cpu_percent_avg", 1.5),
             # hash(task.get("metric_name", "")) % 1000,
             task.get("metric_value", 0),
-            task.get("size_mb",0)
+            float(task.get("size_mb",0))
         ]
 
     def predict(self, task: dict) -> float:
@@ -321,6 +321,7 @@ class Scheduler:
                             w = self.workers[wid]
                             subtask_id = status.get("subtask_id")
                             metadata = get_metadata(subtask_id, r)
+                            print(metadata)
                             status.update(metadata)
                             est_runtime = self.task_estimates.get(
                                 subtask_id, runtime)

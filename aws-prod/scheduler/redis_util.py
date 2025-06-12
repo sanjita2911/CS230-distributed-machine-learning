@@ -34,6 +34,6 @@ def get_metadata(subtask_id, redis_client):
         if not metadata:
             return {"status": "error", "message": "No metadata found at referenced key"}
 
-        return {"status": "success", "metadata": metadata}
+        return metadata
     except Exception as e:
         return {"status": "error", "message": f"Redis error: {e}"}
