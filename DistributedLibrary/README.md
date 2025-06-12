@@ -21,7 +21,6 @@ This package allows users to:
     - data_name (str): Name of the dataset.
 - Returns path where data was downloaded, otherwise 404 Error.
 
-
 #### download_data(data_link, data_name, data_type)
 - Downloads data from a specified source.
 - Arguments:
@@ -29,6 +28,12 @@ This package allows users to:
     - data_name (str): Name to save dataset as.
     - data_type (str): Source type (e.g., “kaggle”).
 - Returns path where data was downloaded.
+
+#### preprocess(self, dataset_name, yaml)
+- Submits a preprocessing job to the API.
+- Arguments:
+    - dataset_name (str): Name of dataset.
+    - yaml (str): Path to yaml configuration file.
 
 #### train(estimator, dataset_name, train_params=None, wait_for_completion=False)
 - Submits a training job to the API.
@@ -44,3 +49,10 @@ This package allows users to:
 - Arguments:
     - job_id (str): Unique job identifier.
 - Returns training progress and job results (i.e. best results, best parameters)
+
+#### download_best_model(self, job_id, model_path, model_id)
+- Downloads best model from a job.
+- Arguments:
+    - job_id (str): Unique job identifier.
+    - model_path (str): Path to store model.
+    - model_id (str): Unique model identifier.

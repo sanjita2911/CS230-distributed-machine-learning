@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distributed-ml"
-version = "0.2.3"
+version = "0.2.6"
 authors = [{name = "Sumit Raut", email = "sumitcraut@gmail.com"}, {name = "Audrey Nguyen", email = "audrehn3@uci.edu"}, {name = "Sanjita Nayak", email = "nayaksv@uci.edu"}]
 description = "A package for distributed scikit-learn tasks."
 readme = "README.md"

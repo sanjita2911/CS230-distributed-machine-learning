@@ -7,7 +7,7 @@ import threading
 import glob
 import json
 import uuid
-from config import DATASET_PATH, KAFKA_ADDRESS
+from config import DATASET_PATH, KAFKA_ADDRESS, CONFIG_PATH
 from dataset_util import download_dataset, preprocess_data, collect_csv_metadata
 from logger_util import logger
 from redis_util import create_redis_client, save_subtasks_to_redis, update_subtask, save_job_metadata
@@ -15,6 +15,7 @@ from task_handler import create_subtasks, start_result_collector, consume_result
 from kafka_util import KafkaSingleton, send_to_kafka, get_consumer
 from kafka import TopicPartition
 from kafka import KafkaConsumer
+import yaml
 
 redis_client = create_redis_client()
 
@@ -30,12 +31,15 @@ def home():
         "message": "Distributed ML System API",
         "status": "running",
         "endpoints": [
-            "/execute_training",
             "/health",
             "/create_session",
             "/download_data/<session_id>",
-            "/check_status/<session_id>/<job_id>",
-            "/train/<session_id>"
+            "/check_data/<session_id>",
+            "/train/<session_id>",
+            "/train_status/<session_id>",
+            "/metrics/<session_id>/<job_id>"
+            "/download_model/<session_id>/<job_id>",
+            "/preprocess/<session_id>"
         ]
     })
 
@@ -244,7 +248,7 @@ def train_status(session_id):
             data = {
                 "session_id": session_id,
                 "job_id": job_id,
-                "job_status": job_status.decode() if job_status else "unknown",
+                "job_status": job_status if job_status else "unknown",
                 "tasks_pending": pending_tasks,
                 "total_subtasks": total_subtasks,
             }
@@ -336,16 +340,54 @@ def stream_metrics(session_id, job_id):
     return jsonify(list(seen.values())), 200
 
 
-@app.route('/preprocess', methods=['POST'])
-def preprocess():
-    data = request.get_json()
-    input_s3_path = data['input_s3_path']
-    yaml_s3_path = data['yaml_s3_path']
-    output_s3_path = data['output_s3_path']
+@app.route('/preprocess/<session_id>', methods=['POST'])
+def preprocess(session_id):
+    # Validate session ID
+    if not redis_client.sismember("active_sessions", session_id):
+        return jsonify({"error": "Invalid session ID"}), 404
+    
+    payload = request.get_json()
+    
+    # Retrieve data
+    dataset_id = payload.get('dataset_id')
+    data_dir = f"/mnt/efs/datasets/{dataset_id}"
+    csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
+    dataset_path = csv_paths[0] if csv_paths else None
+    
+    if not dataset_path or not os.path.exists(dataset_path):
+        return jsonify({'error': f'Dataset {dataset_id} not found'}), 404
+    
+    # Upload yaml to efs   
+    yaml_url = payload.get('yaml_url')
+    yaml_dir = os.path.join(CONFIG_PATH, dataset_id)   # dataset and yaml under same id
 
-    preprocess_data(input_s3_path, yaml_s3_path, output_s3_path)
+    if not yaml_url:
+        return jsonify({"error": "Missing yaml parameters"}), 400
+    
+    # success, message = download_dataset(yaml_url, "local", yaml_dir)
+    # if not success:
+    #     return jsonify({"error": message}), 500
+    
+    # Retrieve yaml
+    yaml_paths = glob.glob(os.path.join(yaml_dir, "*.yaml"))
+    yaml_path = yaml_paths[0] if yaml_paths else None
+    
+    # Preprocess data w/ yaml settings
+    with open(yaml_path, "r") as f:
+        config = yaml.safe_load(f)
 
-    return jsonify({'status': 'Preprocessing completed', 'output_s3_path': output_s3_path})
+    preprocessed_df = preprocess_data(dataset_path, config)
+
+    # Upload preprocessed data as csv to efs
+    preprocessed_data_dir = os.path.join(data_dir, "preprocessed")
+    preprocessed_data_url = f"{dataset_id}_preprocessed.csv"
+    preprocessed_df.to_csv(preprocessed_data_url, index=False)
+
+    success, message = download_dataset(preprocessed_data_url, "local", preprocessed_data_dir)
+    if success:
+        return jsonify({"message": f"Dataset successfully preprocessed and downloaded to {preprocessed_data_dir}"}), 200
+    else:
+        return jsonify({"error": message}), 500
 
 
 if __name__ == "__main__":

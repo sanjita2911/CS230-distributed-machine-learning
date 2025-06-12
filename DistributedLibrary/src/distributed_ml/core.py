@@ -166,7 +166,7 @@ class MLTaskManager:
             'train_params': train_params,
             'timestamp': datetime.now().isoformat()
         }
-        api_response = self._api_request(f"train/{self.session_id}", "post", data=payload)
+        api_response = self._api_request(f"train_status/{self.session_id}", "post", data=payload)
         print("Job Created:", self.job_id)
         print(api_response['status'])
         if wait_for_completion and api_response.get("status") != "error":
@@ -175,7 +175,7 @@ class MLTaskManager:
 
     def check_job_status(self, job_id):
         """Checks the status of a training job."""
-        return self._api_request(f"check_status/{self.session_id}/{job_id}", "get")
+        return self._api_request(f"metrics/{self.session_id}/{job_id}", "get")
 
     def _wait_for_completion(self, job_id, polling_interval=1, timeout=60):
         """Waits for a training job to complete, displaying progress."""
@@ -197,3 +197,17 @@ class MLTaskManager:
                     self.result = status
                     return status
                 time.sleep(polling_interval)
+
+    def download_best_model(self, job_id, model_path, model_id):
+        """Downloads the best result from training job."""
+        return self._api_request(f"/download_model/{self.session_id}/{job_id}", "post", data={
+            "model_path": model_path,
+            "model_id": model_id
+        })
+
+    def preprocess(self, dataset_name, yaml):
+        """Submits a preprocessing job to the API."""
+        return self._api_request(f"preprocess/{self.session_id}", "post", data={
+            "dataset_id": dataset_name,
+            "yaml_url": yaml
+        })

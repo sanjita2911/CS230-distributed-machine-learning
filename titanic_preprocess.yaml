@@ -1,0 +1,32 @@
+drop_null: false
+
+impute:
+  Age: median
+  Embarked: mode
+
+outliers:
+  Age: iqr
+  Fare: clip
+
+drop_columns:
+  - Cabin
+  - Ticket
+  - Name
+  - PassengerId
+
+drop_duplicates: true
+
+categorical:
+  - Sex
+  - Embarked
+  - Pclass
+
+scale:
+  method: standard
+  columns:
+    - Age
+    - Fare
+    - SibSp
+    - Parch
+
+target_column: Survived

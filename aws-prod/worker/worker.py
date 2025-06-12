@@ -296,11 +296,11 @@ def train_model(task):
     train_param = task.get('train_params', {})
 
     # Load the dataset
-    X, y = load_dataset(dataset_id, train_param)
+    X, y = load_dataset(dataset_id)
 
     # Split into train/test sets
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
+        X, y, train_param['test_size'], train_param['random_state'])
 
     # Create model instance
     model = get_model_instance(algorithm_name, parameters)
@@ -387,7 +387,7 @@ def process_task(task):
     return train_model(task)
 
 
-def load_dataset(dataset_id, train_param):
+def load_dataset(dataset_id):
     """
     Load dataset from the data store.
 
@@ -403,7 +403,7 @@ def load_dataset(dataset_id, train_param):
     # dataset_path = f"/mnt/efs/datasets/{dataset_id}/{dataset_id}.csv"
     # dataset_path = f"/mnt/datasets/{dataset_id}.csv" # ON AWS uncomment
 
-    data_dir = f"/mnt/efs/datasets/{dataset_id}"
+    data_dir = f"/mnt/efs/datasets/{dataset_id}/preprocessed"
     csv_paths = glob.glob(os.path.join(data_dir, "*.csv"))
     dataset_path = csv_paths[0]
 
@@ -420,16 +420,16 @@ def load_dataset(dataset_id, train_param):
     #
     #     return X, y
 
-    X_columns = train_param['feature_columns']
-    y = train_param['target_column']
-
     # Load from file
-    logger.info(f'Loading dataset {dataset_path}')
+    logger.info(f'Loading Dataset {dataset_path}')
     df = pd.read_csv(dataset_path)
-    # Assuming the last column is the target
-    X = df[X_columns]
-    y = df[y]
 
+    # last column is the target
+    X = df.iloc[:, :-1]
+    y = df.iloc[:, -1]
+
+    logger.info("X:\n%s", X.head().to_string())
+    logger.info("y:\n%s", y.head().to_string())
     return X, y
 
 

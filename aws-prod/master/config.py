@@ -9,6 +9,7 @@
 # Local Docker Configuration
 
 DATASET_PATH = "/mnt/efs/datasets"
+CONFIG_PATH = "/mnt/efs/configs"
 REGION = 'us-east-2'
 KAFKA_TRAIN_TOPIC = 'train'
 KAFKA_RESULTS_TOPIC = 'result'

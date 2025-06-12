@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="distributed-ml",
-    version="0.2.3",
+    version="0.2.6",
     author="Sumit Raut",
     author_email="sumitcraut@gmail.com",
     description="A package for distributed scikit-learn tasks.",
